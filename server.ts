@@ -859,6 +859,26 @@ app.get('/api/download-youtube', async (req: Request, res: Response) => {
     const { Readable } = await import('stream');
     const { pipeline } = await import('stream/promises');
 
+    // 0. If direct stream URL is already known and passed, stream it immediately!
+    const streamUrlParam = (req.query.url as string || '').trim();
+    if (streamUrlParam && streamUrlParam.startsWith('http') && !streamUrlParam.includes('ytimg.com')) {
+      try {
+        const streamResp = await fetch(streamUrlParam);
+        if (streamResp.ok && streamResp.body) {
+          res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
+          res.setHeader('Content-Type', mimeType);
+          res.setHeader('Content-Transfer-Encoding', 'binary');
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          const cl = streamResp.headers.get('content-length');
+          if (cl) res.setHeader('Content-Length', cl);
+
+          await pipeline(Readable.fromWeb(streamResp.body as any), res);
+          return;
+        }
+      } catch {}
+    }
+
     // 1. Try btch-downloader direct authenticated proxy stream
     try {
       const { youtube } = await import('btch-downloader');
