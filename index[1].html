@@ -1,0 +1,1611 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <script>
+    (function() {
+      try {
+        var _origFetch = window.fetch;
+        Object.defineProperty(window, 'fetch', {
+          get: function() { return _origFetch; },
+          set: function(fn) { _origFetch = fn; },
+          configurable: true,
+          enumerable: true
+        });
+      } catch (e) {}
+    })();
+  </script>
+  <meta name="google-site-verification" content="zfW3H_BHZ-_Xce19Ca5Ln-zOC7iu7klTf72zbDFxj-w" />
+  <title>SnapRill - All-in-One HD Video Downloader & AI Studio</title>
+  <meta name="description" content="Download Facebook Reels, YouTube Shorts, Instagram Reels & TikTok in HD 1080p, extract pure MP3 audio, trim video clips, and generate viral captions with AI." />
+  <meta property="og:title" content="SnapRill - HD Video Downloader & AI Studio" />
+  <meta property="og:description" content="High-speed video downloader, MP3 audio extractor, video trimmer, batch downloader & AI format generator." />
+  <meta property="og:type" content="website" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f43f5e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><polygon points='23 7 16 12 23 17 23 7'/><rect x='1' y='5' width='15' height='14' rx='2' ry='2'/></svg>" />
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.4/dist/confetti.browser.min.js"></script>
+  
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'system-ui', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'monospace'],
+          },
+          colors: {
+            brand: {
+              400: '#fb7185',
+              500: '#f43f5e',
+              600: '#e11d48',
+              700: '#be123c',
+            }
+          }
+        }
+      }
+    };
+  </script>
+
+  <style>
+    @keyframes pulseGlow {
+      0%, 100% { opacity: 0.35; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(1.08); }
+    }
+    .animate-glow {
+      animation: pulseGlow 8s ease-in-out infinite;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #080f24;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: rgba(244, 63, 94, 0.4);
+      border-radius: 9999px;
+    }
+    input[type=range] {
+      accent-color: #f43f5e;
+    }
+    @keyframes floatAndRise {
+      0%, 100% {
+        transform: translateY(0px);
+        filter: drop-shadow(0 4px 14px rgba(244, 63, 94, 0.35));
+      }
+      50% {
+        transform: translateY(-5px);
+        filter: drop-shadow(0 8px 24px rgba(244, 63, 94, 0.65));
+      }
+    }
+    .animate-float-heading {
+      animation: floatAndRise 2.8s ease-in-out infinite;
+    }
+    .smooth-button {
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .smooth-button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 25px -5px rgba(244, 63, 94, 0.25);
+    }
+    .smooth-button:active {
+      transform: translateY(1px) scale(0.98);
+    }
+    .smooth-card {
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .smooth-card:hover {
+      border-color: rgba(244, 63, 94, 0.4);
+      box-shadow: 0 15px 30px -10px rgba(0, 0, 0, 0.5), 0 0 20px -5px rgba(244, 63, 94, 0.15);
+    }
+    .gradient-text-accent {
+      background: linear-gradient(135deg, #fb7185 0%, #f43f5e 50%, #818cf8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+  </style>
+</head>
+
+<body class="bg-[#080f24] text-slate-100 font-sans min-h-screen antialiased selection:bg-rose-500 selection:text-white relative overflow-x-hidden" style="background: radial-gradient(circle at 50% 0%, #111d44 0%, #080f24 45%, #050a18 100%) fixed;">
+
+  <!-- Ambient Glow Background (Rich Navy & Subtle Rose Glow) -->
+  <div class="fixed inset-0 overflow-hidden pointer-events-none z-0">
+    <div class="absolute -top-32 left-1/2 -translate-x-1/2 w-[720px] h-[460px] bg-gradient-to-tr from-blue-600/30 via-indigo-600/25 to-rose-600/15 blur-[140px] rounded-full animate-glow"></div>
+    <div class="absolute top-[35%] -right-40 w-[460px] h-[460px] bg-blue-600/20 blur-[130px] rounded-full"></div>
+    <div class="absolute bottom-10 -left-40 w-[460px] h-[460px] bg-indigo-600/20 blur-[130px] rounded-full"></div>
+  </div>
+
+  <div class="relative z-10 flex flex-col min-h-screen">
+
+    <!-- Header Navigation (Seamless Navy Blue Flow) -->
+    <header class="sticky top-0 z-40 bg-[#080f24]/90 backdrop-blur-md border-b border-blue-500/10">
+      <div class="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+        
+        <!-- Logo -->
+        <a href="/" class="flex items-center gap-2.5 group">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-rose-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-rose-500/25 group-hover:scale-105 transition-transform duration-200">
+            <svg class="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="23 7 16 12 23 17 23 7"></polygon>
+              <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+            </svg>
+          </div>
+          <div>
+            <span class="font-extrabold text-xl tracking-tight bg-gradient-to-r from-white via-slate-100 to-rose-400 bg-clip-text text-transparent">SnapRill</span>
+            <span class="hidden sm:inline-block text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 ml-2 rounded-full bg-rose-500/10 text-rose-400 border border-rose-500/20">Studio v3.0</span>
+          </div>
+        </a>
+
+        <!-- Right Action Controls -->
+        <div class="flex items-center gap-2 sm:gap-3">
+          
+          <!-- Mode Toggle (Single vs Batch) -->
+          <button id="modeToggleBtn" onclick="toggleBatchMode()" class="px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all duration-200 flex items-center gap-1.5 bg-[#0b1430] border-blue-500/20 text-blue-200 hover:text-white hover:border-blue-400/40">
+            <span id="modeIcon">📦</span>
+            <span id="modeText">Batch Mode</span>
+          </button>
+
+          <!-- History Button -->
+          <button onclick="toggleHistoryDrawer()" class="p-2 rounded-lg bg-[#0b1430] border border-blue-500/20 hover:border-blue-400/40 text-blue-200 hover:text-white transition-colors relative" title="Download History">
+            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <polyline points="12 6 12 12 16 14"></polyline>
+            </svg>
+            <span id="historyBadge" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-rose-500 rounded-full"></span>
+          </button>
+
+          <!-- Language Toggle -->
+          <button id="langToggleBtn" onclick="toggleLanguage()" class="px-2.5 py-1.5 rounded-lg bg-[#0b1430] border border-blue-500/20 hover:border-blue-400/40 text-xs font-bold text-rose-400 transition-colors">
+            BN / EN
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content Container -->
+    <main class="flex-1 max-w-4xl w-full mx-auto px-4 py-8 sm:py-12 flex flex-col items-center">
+
+      <!-- Hero Heading (Rock-solid fixed height layout to eliminate vibration) -->
+      <div class="text-center max-w-2xl mx-auto mb-8 sm:mb-10 overflow-visible">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs font-semibold mb-4">
+          <span class="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+          <span id="heroBadgeText">100% Free • Direct Local Download • No Watermark</span>
+        </div>
+        <div class="flex items-center justify-center text-center mb-3 overflow-visible select-none h-[84px] sm:h-[104px]">
+          <h1 class="text-2xl sm:text-4xl md:text-5xl font-extrabold tracking-tight text-white leading-tight overflow-visible">
+            <span id="loopingHeroHeading" class="inline-flex flex-wrap items-center justify-center gap-x-2.5 gap-y-1.5 overflow-visible">
+              <!-- Static layout nodes animated smoothly without height shifting -->
+            </span>
+          </h1>
+        </div>
+        <p class="text-slate-300 text-sm sm:text-base leading-relaxed" id="heroSubtitle">
+          Support for Facebook Reels, YouTube Shorts, Instagram Reels & TikTok. Download video, extract MP3 audio, trim custom clips & generate AI viral captions!
+        </p>
+
+        <!-- Supported Badges -->
+        <div class="flex flex-wrap items-center justify-center gap-2 sm:gap-3 mt-4 text-xs font-medium text-blue-200">
+          <span class="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#0e1a3b] border border-blue-900/40">
+            <span class="text-rose-500">📸</span> Instagram
+          </span>
+          <span class="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#0e1a3b] border border-blue-900/40">
+            <span class="text-red-500">▶️</span> YouTube Shorts
+          </span>
+          <span class="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#0e1a3b] border border-blue-900/40">
+            <span class="text-blue-400">👍</span> Facebook Reels
+          </span>
+          <span class="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-[#0e1a3b] border border-blue-900/40">
+            <span class="text-cyan-400">🎵</span> TikTok
+          </span>
+        </div>
+      </div>
+
+      <!-- SINGLE URL MODE CONTAINER -->
+      <section id="singleModeSection" class="w-full max-w-2xl">
+        <div class="bg-[#0e1b3d]/90 border border-blue-900/50 p-2 sm:p-2.5 rounded-2xl shadow-2xl shadow-blue-950/70 focus-within:border-rose-500/50 transition-all duration-300">
+          <div class="flex flex-col sm:flex-row items-center gap-2">
+            
+            <div class="relative w-full flex-1 flex items-center">
+              <span class="absolute left-3.5 text-blue-400/60">
+                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                  <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                </svg>
+              </span>
+              <input
+                id="urlInput"
+                type="url"
+                placeholder="Paste Instagram, YouTube, TikTok or Facebook Reel link here..."
+                class="w-full bg-transparent pl-11 pr-24 py-3.5 text-sm sm:text-base text-white placeholder-blue-300/40 focus:outline-none"
+                autocomplete="off"
+              />
+              <div class="absolute right-2 flex items-center gap-1">
+                <button
+                  type="button"
+                  onclick="pasteFromClipboard()"
+                  class="px-2.5 py-1 rounded-md text-xs font-semibold bg-[#13224d] hover:bg-[#1a2f6b] text-blue-200 hover:text-white border border-blue-800/40 transition-colors"
+                >
+                  Paste
+                </button>
+                <button
+                  id="clearInputBtn"
+                  type="button"
+                  onclick="clearInput()"
+                  class="hidden p-1 text-blue-300/60 hover:text-white"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            <button
+              id="fetchBtn"
+              onclick="handleResolve()"
+              class="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-gradient-to-r from-rose-500 to-indigo-600 hover:from-rose-600 hover:to-indigo-700 text-white font-bold text-sm tracking-wide shadow-lg shadow-rose-500/25 flex items-center justify-center gap-2 transition-all duration-200 active:scale-95"
+            >
+              <span id="fetchBtnSpinner" class="hidden w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+              <span id="fetchBtnText">Fetch Video</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Sample Pills -->
+        <div class="flex flex-wrap items-center justify-center gap-2 mt-3 text-xs text-blue-300/70">
+          <span class="text-blue-300/60">Quick Test:</span>
+          <button onclick="loadSample('sample-insta-1')" class="px-2.5 py-1 rounded-full bg-[#0c1635] border border-blue-900/50 hover:border-rose-500/50 text-blue-200 hover:text-white transition-colors">📸 Bali Reel</button>
+          <button onclick="loadSample('sample-yt-1')" class="px-2.5 py-1 rounded-full bg-[#0c1635] border border-blue-900/50 hover:border-red-500/50 text-blue-200 hover:text-white transition-colors">▶️ iPhone Hacks</button>
+          <button onclick="loadSample('sample-tiktok-1')" class="px-2.5 py-1 rounded-full bg-[#0c1635] border border-blue-900/50 hover:border-cyan-500/50 text-blue-200 hover:text-white transition-colors">🎵 Puppy TikTok</button>
+          <button onclick="loadSample('sample-durga-1')" class="px-2.5 py-1 rounded-full bg-[#0c1635] border border-blue-900/50 hover:border-amber-500/50 text-blue-200 hover:text-white transition-colors">🕉️ Durga Puja Reel</button>
+        </div>
+
+        <!-- Error Alert -->
+        <div id="errorAlert" class="hidden mt-4 p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm flex items-start gap-3">
+          <span class="text-rose-400 text-lg">⚠️</span>
+          <div class="flex-1" id="errorMessageText"></div>
+          <button onclick="hideError()" class="text-rose-400 hover:text-rose-200">✕</button>
+        </div>
+      </section>
+
+      <!-- BATCH MODE CONTAINER -->
+      <section id="batchModeSection" class="hidden w-full max-w-2xl">
+        <div class="bg-slate-900/90 border border-slate-800 p-4 sm:p-5 rounded-2xl shadow-2xl">
+          <div class="flex items-center justify-between mb-2">
+            <label class="text-sm font-bold text-white flex items-center gap-2">
+              <span>📦 Batch Downloader</span>
+              <span class="text-xs font-normal text-slate-400">(Paste up to 5 URLs, 1 per line)</span>
+            </label>
+            <span class="text-xs text-rose-400 font-semibold" id="batchCountBadge">0 URLs</span>
+          </div>
+
+          <textarea
+            id="batchTextarea"
+            rows="4"
+            placeholder="https://www.instagram.com/reel/xyz/&#10;https://www.youtube.com/shorts/abc&#10;https://www.tiktok.com/@user/video/123"
+            class="w-full bg-slate-950/80 border border-slate-800 rounded-xl p-3 text-sm text-white font-mono placeholder-slate-600 focus:outline-none focus:border-rose-500 transition-colors custom-scrollbar"
+            oninput="updateBatchCount()"
+          ></textarea>
+
+          <div class="flex items-center justify-between mt-3 gap-2">
+            <button
+              onclick="loadBatchDemo()"
+              class="px-3 py-2 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
+            >
+              Paste Demo URLs
+            </button>
+            <button
+              id="batchFetchBtn"
+              onclick="startBatchProcessing()"
+              class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-500 to-indigo-600 hover:from-rose-600 hover:to-indigo-700 text-white font-bold text-xs tracking-wide shadow-lg shadow-rose-500/25 flex items-center gap-2"
+            >
+              <span id="batchBtnSpinner" class="hidden w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+              <span id="batchBtnText">Process All URLs</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Batch Results List -->
+        <div id="batchResultsList" class="mt-4 space-y-3"></div>
+      </section>
+
+      <!-- RESULT SECTION (PREVIEW, DOWNLOADS, TRIMMER, AI FORMATS) -->
+      <section id="resultsSection" class="hidden w-full max-w-3xl mt-8 space-y-6">
+
+        <!-- Download Instant Notification Toast -->
+        <div id="downloadToast" class="hidden p-4 rounded-xl bg-emerald-950/90 border border-emerald-500/40 text-emerald-200 text-xs sm:text-sm flex items-center gap-3 shadow-2xl shadow-emerald-900/50 backdrop-blur-md transition-all">
+          <span class="text-emerald-400 text-lg flex-shrink-0 animate-bounce">📥</span>
+          <span id="downloadToastText" class="flex-1 font-semibold leading-snug"></span>
+          <button onclick="document.getElementById('downloadToast').classList.add('hidden')" class="text-emerald-400 hover:text-white p-1">✕</button>
+        </div>
+
+        <!-- Video Card & Preview -->
+        <div class="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
+          <div class="p-4 sm:p-6 grid grid-cols-1 md:grid-cols-12 gap-6">
+            
+            <!-- Video / Thumbnail Frame (5 Cols) -->
+            <div class="md:col-span-5 flex flex-col items-center">
+              <div id="videoContainerBox" class="relative w-full aspect-[9/16] max-h-[380px] bg-black rounded-xl overflow-hidden border border-slate-800 flex items-center justify-center group shadow-inner">
+                <video
+                  id="previewVideoPlayer"
+                  controls
+                  playsinline
+                  class="w-full h-full object-cover hidden cursor-pointer"
+                  src=""
+                ></video>
+                <iframe
+                  id="previewIframePlayer"
+                  class="w-full h-full object-cover hidden"
+                  src=""
+                  frameborder="0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowfullscreen
+                ></iframe>
+                <img
+                  id="previewThumbnailImg"
+                  src=""
+                  alt="Video thumbnail"
+                  class="w-full h-full object-cover"
+                />
+                <button
+                  id="playOverlayBtn"
+                  onclick="toggleVideoPlayback()"
+                  class="absolute inset-0 flex items-center justify-center bg-black/40 group-hover:bg-black/20 transition-colors"
+                  title="Click to play / stop"
+                >
+                  <div class="w-14 h-14 rounded-full bg-rose-500/90 text-white flex items-center justify-center shadow-lg shadow-rose-500/40 group-hover:scale-110 transition-transform">
+                    <svg id="playIconSvg" class="w-6 h-6 ml-0.5" viewBox="0 0 24 24" fill="currentColor">
+                      <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                    </svg>
+                  </div>
+                </button>
+                <span id="previewDurationBadge" class="absolute bottom-2.5 right-2.5 px-2 py-0.5 rounded bg-black/80 text-[11px] font-mono text-white pointer-events-none">00:15</span>
+              </div>
+            </div>
+
+            <!-- Video Details & Direct Downloads (7 Cols) -->
+            <div class="md:col-span-7 flex flex-col justify-between space-y-4">
+              <div>
+                <!-- Platform & Stats Bar -->
+                <div class="flex items-center justify-between gap-2 mb-2">
+                  <span id="resPlatformBadge" class="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                    Instagram Reel
+                  </span>
+                  <div class="flex items-center gap-3 text-xs text-slate-400">
+                    <span id="resViews">👁️ 1.2M</span>
+                    <span id="resLikes">❤️ 150K</span>
+                  </div>
+                </div>
+
+                <!-- Title & Author -->
+                <h2 id="resTitle" class="text-base sm:text-lg font-bold text-white line-clamp-2 mb-2 leading-snug">
+                  Video Title
+                </h2>
+                <div class="flex items-center gap-2 text-xs text-slate-400 mb-4">
+                  <img id="resAvatar" src="https://ui-avatars.com/api/?name=User" class="w-5 h-5 rounded-full object-cover" alt="Avatar" />
+                  <span id="resAuthor" class="font-medium text-slate-300">@creator</span>
+                </div>
+
+                <!-- Custom Save Filename -->
+                <div class="mb-4">
+                  <label class="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">Save Filename:</label>
+                  <div class="flex items-center bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 focus-within:border-rose-500">
+                    <input id="customFilenameInput" type="text" value="SnapRill_Video" class="bg-transparent text-xs text-white w-full focus:outline-none font-mono" />
+                    <span class="text-xs text-slate-500 ml-1">.mp4/.mp3</span>
+                  </div>
+                </div>
+
+                <!-- Action Download Buttons -->
+                <div class="space-y-2">
+                  <!-- HD Video Download Button -->
+                  <button
+                    onclick="triggerDirectDownload('hd', 'mp4')"
+                    class="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-rose-500 to-rose-600 hover:from-rose-600 hover:to-rose-700 text-white font-bold text-xs sm:text-sm shadow-md shadow-rose-500/20 flex items-center justify-between transition-transform active:scale-[0.98]"
+                  >
+                    <span class="flex items-center gap-2">
+                      <span>📥</span>
+                      <span>Download HD 1080p Video</span>
+                    </span>
+                    <span class="text-[10px] bg-black/25 px-2 py-0.5 rounded font-mono">No Watermark</span>
+                  </button>
+
+                  <!-- Mobile 720p Download Button -->
+                  <button
+                    onclick="triggerDirectDownload('sd', 'mp4')"
+                    class="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs sm:text-sm border border-slate-700 flex items-center justify-between transition-colors"
+                  >
+                    <span class="flex items-center gap-2">
+                      <span>📱</span>
+                      <span>Download Mobile 720p (Faster)</span>
+                    </span>
+                    <span class="text-[10px] text-slate-400 font-mono">Fast Save</span>
+                  </button>
+
+                  <!-- Extract Audio Only (MP3) -->
+                  <button
+                    onclick="triggerAudioExtraction()"
+                    class="w-full py-2.5 px-4 rounded-xl bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 hover:border-indigo-500/50 font-bold text-xs sm:text-sm flex items-center justify-between transition-colors"
+                  >
+                    <span class="flex items-center gap-2">
+                      <span>🎵</span>
+                      <span>Extract & Download Audio (MP3)</span>
+                    </span>
+                    <span class="text-[10px] bg-indigo-500/20 px-2 py-0.5 rounded font-mono">320kbps</span>
+                  </button>
+                </div>
+
+                <p class="text-[11px] text-slate-500 text-center mt-2">
+                  Saved directly to your device Downloads folder (Android, iOS & PC compatible).
+                </p>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- VIDEO & AUDIO TRIMMER CARD -->
+        <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-2xl">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+              <span>✂️</span>
+              <span>Precision Video & Audio Trimmer</span>
+            </h3>
+            <span id="trimDurationBadge" class="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">
+              0s - 15s (15s selected)
+            </span>
+          </div>
+
+          <div class="space-y-4">
+            <!-- Start Time Slider -->
+            <div>
+              <div class="flex justify-between text-xs text-slate-400 mb-1">
+                <span>Start Time: <strong id="startTimeDisplay" class="text-white font-mono">0s</strong></span>
+                <span class="text-[11px] text-slate-500">Drag to set start point</span>
+              </div>
+              <input
+                id="trimStartSlider"
+                type="range"
+                min="0"
+                max="60"
+                value="0"
+                step="0.5"
+                class="w-full h-2 bg-slate-800 rounded-lg cursor-pointer"
+                oninput="onTrimSliderChange()"
+              />
+            </div>
+
+            <!-- End Time Slider -->
+            <div>
+              <div class="flex justify-between text-xs text-slate-400 mb-1">
+                <span>End Time: <strong id="endTimeDisplay" class="text-white font-mono">15s</strong></span>
+                <span class="text-[11px] text-slate-500">Drag to set end point</span>
+              </div>
+              <input
+                id="trimEndSlider"
+                type="range"
+                min="0"
+                max="60"
+                value="15"
+                step="0.5"
+                class="w-full h-2 bg-slate-800 rounded-lg cursor-pointer"
+                oninput="onTrimSliderChange()"
+              />
+            </div>
+
+            <!-- Trim Action Buttons -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+              <button
+                onclick="triggerTrimmedDownload('mp4')"
+                class="py-2.5 px-4 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-rose-500/20 transition-transform active:scale-95"
+              >
+                <span>✂️</span>
+                <span>Download Trimmed Video (MP4)</span>
+              </button>
+              <button
+                onclick="triggerTrimmedDownload('mp3')"
+                class="py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-colors"
+              >
+                <span>🎶</span>
+                <span>Download Trimmed Audio (MP3)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- GEMINI AI FORMAT GENERATOR (INSTAGRAM, YOUTUBE, TIKTOK, FACEBOOK) -->
+        <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-2xl">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+            <div>
+              <h3 class="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                <span>✨</span>
+                <span>AI Platform Format & Viral Caption Studio</span>
+              </h3>
+              <p class="text-xs text-slate-400 mt-0.5">
+                Automatically adapts the downloaded video topic for your target platform with hooks, hashtags & descriptions.
+              </p>
+            </div>
+            <button
+              id="aiGenerateBtn"
+              onclick="generateAiFormat()"
+              class="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 text-white text-xs font-bold shadow-md shadow-purple-500/20 flex items-center gap-1.5 self-start sm:self-auto"
+            >
+              <span id="aiBtnSpinner" class="hidden w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+              <span>⚡ Generate Now</span>
+            </button>
+          </div>
+
+          <!-- Platform Selector Tabs -->
+          <div class="flex items-center gap-2 border-b border-slate-800 pb-3 mb-4 overflow-x-auto custom-scrollbar">
+            <button onclick="selectAiPlatform('instagram')" id="tab-instagram" class="ai-tab px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-rose-500/20 text-rose-400 border border-rose-500/30">
+              📸 Instagram Reel
+            </button>
+            <button onclick="selectAiPlatform('youtube')" id="tab-youtube" class="ai-tab px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-slate-800 text-slate-400 border border-transparent hover:text-white">
+              ▶️ YouTube Shorts
+            </button>
+            <button onclick="selectAiPlatform('tiktok')" id="tab-tiktok" class="ai-tab px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-slate-800 text-slate-400 border border-transparent hover:text-white">
+              🎵 TikTok Viral
+            </button>
+            <button onclick="selectAiPlatform('facebook')" id="tab-facebook" class="ai-tab px-3 py-1.5 rounded-lg text-xs font-bold transition-all bg-slate-800 text-slate-400 border border-transparent hover:text-white">
+              👍 Facebook Watch
+            </button>
+          </div>
+
+          <!-- AI Output Box -->
+          <div class="relative">
+            <textarea
+              id="aiOutputText"
+              rows="8"
+              readonly
+              class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-xs text-slate-200 font-mono leading-relaxed focus:outline-none custom-scrollbar"
+              placeholder="Click 'Generate Now' above to create viral captions, hashtags, hooks, and keywords for this video..."
+            ></textarea>
+            <button
+              onclick="copyAiContent()"
+              id="copyAiBtn"
+              class="absolute top-2.5 right-2.5 px-3 py-1 rounded-md bg-slate-800/90 hover:bg-slate-700 text-[11px] font-semibold text-slate-300 hover:text-white border border-slate-700 flex items-center gap-1 transition-colors"
+            >
+              <span>📋</span>
+              <span id="copyAiBtnText">Copy</span>
+            </button>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- FREQUENTLY ASKED QUESTIONS (FAQ) ACCORDION (Always visible on homepage) -->
+      <section class="w-full max-w-2xl mt-12 sm:mt-16 mb-6">
+        <div class="text-center mb-6">
+          <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-semibold mb-2">
+            <span>💡</span>
+            <span id="faqBadgeText">Got Questions? We Got Answers</span>
+          </div>
+          <h2 class="text-xl sm:text-2xl font-extrabold text-white tracking-tight" id="faqHeadingText">
+            Frequently Asked Questions
+          </h2>
+          <p class="text-blue-200/70 text-xs sm:text-sm mt-1" id="faqSubtitleText">
+            Everything you need to know about downloading Reels & Shorts with SnapRill
+          </p>
+        </div>
+
+        <div class="space-y-3" id="faqAccordionContainer">
+          <!-- FAQ Item 1 -->
+          <div class="faq-item rounded-2xl bg-[#0e1b3d]/85 border border-blue-900/40 overflow-hidden transition-all duration-300">
+            <button onclick="toggleFaq(0)" class="w-full p-4 text-left flex items-center justify-between gap-3 text-sm sm:text-base font-semibold text-white hover:text-rose-400 transition-colors">
+              <span id="faqQ0">Is SnapRill 100% free with unlimited downloads?</span>
+              <svg id="faqIcon0" class="w-4 h-4 text-blue-300 transform transition-transform duration-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            <div id="faqA0" class="hidden px-4 pb-4 pt-1 text-xs sm:text-sm text-slate-300 border-t border-blue-900/30 leading-relaxed">
+              <span id="faqAText0">Yes, completely free! There are no hidden subscription charges, usage limits, or account logins required. You can download and save as many Facebook Reels, YouTube Shorts, Instagram Reels, and TikTok videos as you want.</span>
+            </div>
+          </div>
+
+          <!-- FAQ Item 2 -->
+          <div class="faq-item rounded-2xl bg-[#0e1b3d]/85 border border-blue-900/40 overflow-hidden transition-all duration-300">
+            <button onclick="toggleFaq(1)" class="w-full p-4 text-left flex items-center justify-between gap-3 text-sm sm:text-base font-semibold text-white hover:text-rose-400 transition-colors">
+              <span id="faqQ1">Will my downloaded videos have watermarks or logos?</span>
+              <svg id="faqIcon1" class="w-4 h-4 text-blue-300 transform transition-transform duration-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            <div id="faqA1" class="hidden px-4 pb-4 pt-1 text-xs sm:text-sm text-slate-300 border-t border-blue-900/30 leading-relaxed">
+              <span id="faqAText1">No, never! All videos are downloaded in their clean, original high-definition format without any watermarks, stamps, or promotional overlays added by SnapRill.</span>
+            </div>
+          </div>
+
+          <!-- FAQ Item 3 -->
+          <div class="faq-item rounded-2xl bg-[#0e1b3d]/85 border border-blue-900/40 overflow-hidden transition-all duration-300">
+            <button onclick="toggleFaq(2)" class="w-full p-4 text-left flex items-center justify-between gap-3 text-sm sm:text-base font-semibold text-white hover:text-rose-400 transition-colors">
+              <span id="faqQ2">Can I extract MP3 audio and trim custom video clips?</span>
+              <svg id="faqIcon2" class="w-4 h-4 text-blue-300 transform transition-transform duration-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            <div id="faqA2" class="hidden px-4 pb-4 pt-1 text-xs sm:text-sm text-slate-300 border-t border-blue-900/30 leading-relaxed">
+              <span id="faqAText2">Yes! SnapRill includes a dedicated 1-click MP3 audio extraction feature and an interactive video trimming slider that lets you choose custom start/end points to download only the exact segment you need.</span>
+            </div>
+          </div>
+
+          <!-- FAQ Item 4 -->
+          <div class="faq-item rounded-2xl bg-[#0e1b3d]/85 border border-blue-900/40 overflow-hidden transition-all duration-300">
+            <button onclick="toggleFaq(3)" class="w-full p-4 text-left flex items-center justify-between gap-3 text-sm sm:text-base font-semibold text-white hover:text-rose-400 transition-colors">
+              <span id="faqQ3">Where are downloaded videos saved on my phone or computer?</span>
+              <svg id="faqIcon3" class="w-4 h-4 text-blue-300 transform transition-transform duration-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            <div id="faqA3" class="hidden px-4 pb-4 pt-1 text-xs sm:text-sm text-slate-300 border-t border-blue-900/30 leading-relaxed">
+              <span id="faqAText3">All files are directly saved into your device's default "Downloads" folder (or Gallery / Photos on Android & iPhone) so you can access, edit, and share them completely offline.</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Footer (Seamless Navy Blue Theme) -->
+    <footer class="border-t border-blue-500/10 bg-transparent py-10 px-4 text-center text-xs text-blue-300/60">
+      <div class="max-w-4xl mx-auto space-y-2">
+        <p class="font-medium text-slate-300">SnapRill - The ultimate cross-platform media downloader & content creation assistant.</p>
+        <p class="text-[11px] text-blue-400/50">Free educational tool. Please respect content creators' copyrights & platform terms of service.</p>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- HISTORY DRAWER (MODAL) -->
+  <div id="historyDrawer" class="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm hidden flex justify-end">
+    <div class="w-full max-w-md bg-[#0a1229] h-full border-l border-blue-900/40 p-6 flex flex-col shadow-2xl">
+      <div class="flex items-center justify-between pb-4 border-b border-blue-900/40">
+        <div class="flex items-center gap-2">
+          <span class="text-lg">🕒</span>
+          <h3 class="text-base font-bold text-white">Download History</h3>
+        </div>
+        <div class="flex items-center gap-2">
+          <button onclick="clearHistory()" class="text-xs text-rose-400 hover:text-rose-300">Clear All</button>
+          <button onclick="toggleHistoryDrawer()" class="p-1 text-slate-400 hover:text-white">✕</button>
+        </div>
+      </div>
+      <div id="historyItemsContainer" class="flex-1 overflow-y-auto custom-scrollbar py-4 space-y-3">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <!-- APPLICATION CORE SCRIPT -->
+  <script>
+    // SMART API BASE URL:
+    // If running in development (local, Cloud Run, or AI Studio), use relative path.
+    // If pasted onto Blogger (*.blogspot.com) or opened locally, automatically route to the live Google Cloud backend!
+    const LIVE_BACKEND_URL = 'https://snaprill-backend.onrender.com';
+    const API_BASE = (
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1' ||
+      window.location.hostname.includes('run.app') ||
+      window.location.hostname.includes('aistudio')
+    ) ? '' : LIVE_BACKEND_URL;
+
+    // Application State
+    let currentLang = localStorage.getItem('snaprill_lang') || 'en';
+    let currentVideoData = null;
+    let isBatchMode = false;
+    let selectedAiPlatform = 'instagram';
+    let downloadHistory = [];
+
+    try {
+      downloadHistory = JSON.parse(localStorage.getItem('snaprill_history') || '[]');
+    } catch {
+      downloadHistory = [];
+    }
+
+    // Bilingual Dictionary
+    const i18n = {
+      en: {
+        heroBadge: "100% Free • Direct Local Download • No Watermark",
+        heroSubtitle: "Support for Facebook Reels, YouTube Shorts, Instagram Reels & TikTok. Download video, extract MP3 audio, trim custom clips & generate AI viral captions!",
+        fetchBtn: "Fetch Video",
+        batchBtn: "Process All URLs",
+        toastDownload: "📥 Download started! Saving file to your device Downloads folder.",
+        faqBadge: "Got Questions? We Got Answers",
+        faqHeading: "Frequently Asked Questions",
+        faqSubtitle: "Everything you need to know about downloading Reels & Shorts with SnapRill",
+        faqQ0: "Is SnapRill 100% free with unlimited downloads?",
+        faqA0: "Yes, completely free! There are no hidden subscription charges, usage limits, or account logins required. You can download and save as many Facebook Reels, YouTube Shorts, Instagram Reels, and TikTok videos as you want.",
+        faqQ1: "Will my downloaded videos have watermarks or logos?",
+        faqA1: "No, never! All videos are downloaded in their clean, original high-definition format without any watermarks, stamps, or promotional overlays added by SnapRill.",
+        faqQ2: "Can I extract MP3 audio and trim custom video clips?",
+        faqA2: "Yes! SnapRill includes a dedicated 1-click MP3 audio extraction feature and an interactive video trimming slider that lets you choose custom start/end points to download only the exact segment you need.",
+        faqQ3: "Where are downloaded videos saved on my phone or computer?",
+        faqA3: "All files are directly saved into your device's default \"Downloads\" folder (or Gallery / Photos on Android & iPhone) so you can access, edit, and share them completely offline."
+      },
+      bn: {
+        heroBadge: "১০০% ফ্রি • সরাসরি লোকাল ফোল্ডারে ডাউনলোড • ওয়াটারমার্ক ছাড়া",
+        heroSubtitle: "ফেসবুক রিলস, ইউটিউব শর্টস, ইনস্টাগ্রাম ও টিকটক সাপোর্ট। ভিডিও ও অডিও ডাউনলোড, ক্লিপ ট্রিম এবং AI দিয়ে আকর্ষণীয় ক্যাপশন তৈরি করুন!",
+        fetchBtn: "ভিডিও খুঁজুন",
+        batchBtn: "সব লিঙ্ক প্রসেস করুন",
+        toastDownload: "📥 ডাউনলোড শুরু হয়েছে! ফাইলটি সরাসরি আপনার ডিভাইসের Downloads ফোল্ডারে সেভ হচ্ছে।",
+        faqBadge: "প্রশ্ন আছে? জেনে নিন উত্তর",
+        faqHeading: "সাধারণ জিজ্ঞাসা (FAQ)",
+        faqSubtitle: "SnapRill দিয়ে রিলস ও শর্টস ডাউনলোড সম্পর্কে প্রয়োজনীয় তথ্যাবলী",
+        faqQ0: "SnapRill কি সম্পূর্ণ ফ্রি এবং আনলিমিটেড ডাউনলোড করা যায়?",
+        faqA0: "হ্যাঁ, এটি সম্পূর্ণ বিনামূল্যে ব্যবহারযোগ্য! কোনো সাবস্ক্রিপশন চার্জ বা লগইন করার ঝামেলা নেই। আপনি যত খুশি ফেসবুক রিলস, ইউটিউব শর্টস, ইনস্টাগ্রাম ও টিকটক ভিডিও ডাউনলোড করতে পারেন।",
+        faqQ1: "ডাউনলোড করা ভিডিওতে কি কোনো ওয়াটারমার্ক থাকবে?",
+        faqA1: "না, একেবারেই না! SnapRill দিয়ে ডাউনলোড করা প্রতিটি ভিডিও আসল হাই-ডেফিনিশন কোয়ালিটিতে সেভ হয় এবং এতে কোনো অতিরিক্ত ওয়াটারমার্ক বা লোগো থাকে না।",
+        faqQ2: "আমি কি শুধু MP3 অডিও বের করতে বা ভিডিও ট্রিম করতে পারব?",
+        faqA2: "অবশ্যই! এতে ১ ক্লিকে অরিজিনাল MP3 অডিও বের করার সুবিধা এবং আপনার পছন্দের নির্দিষ্ট অংশ কেটে নেওয়ার জন্য ভিডিও ট্রিমার স্লাইডার রয়েছে।",
+        faqQ3: "ভিডিওগুলো আমার মোবাইল বা কম্পিউটারে কোথায় সেভ হবে?",
+        faqA3: "ফাইলগুলো সরাসরি আপনার ডিভাইসের ডিফল্ট \"Downloads\" ফোল্ডারে (বা মোবাইলের গ্যালারিতে) সেভ হয়ে যায়, ফলে ইন্টারনেট ছাড়াও আপনি যেকোনো সময় দেখতে পারেন।"
+      }
+    };
+
+    // Word-By-Word Smooth Floating Heading Animation ("akta word smooth hoye dhire dhire vese othbe")
+    const wordAnimationData = {
+      en: [
+        { word: "Download", isAccent: false },
+        { word: "Reels", isAccent: false },
+        { word: "&", isAccent: false },
+        { word: "Shorts", isAccent: false },
+        { word: "in", isAccent: false },
+        { word: "Pure", isAccent: true },
+        { word: "HD", isAccent: true },
+        { word: "Quality", isAccent: true }
+      ],
+      bn: [
+        { word: "রিলস", isAccent: false },
+        { word: "ও", isAccent: false },
+        { word: "শর্টস", isAccent: false },
+        { word: "ডাউনলোড", isAccent: false },
+        { word: "করুন", isAccent: false },
+        { word: "একদম", isAccent: true },
+        { word: "আসল", isAccent: true },
+        { word: "HD", isAccent: true },
+        { word: "কোয়ালিটিতে", isAccent: true }
+      ]
+    };
+
+    let headingWordIndex = 0;
+    let headingTimer = null;
+
+    function setupHeadingNodes() {
+      clearTimeout(headingTimer);
+      const container = document.getElementById('loopingHeroHeading');
+      if (!container) return;
+      const words = wordAnimationData[currentLang] || wordAnimationData.en;
+
+      // Pre-populate all word spans so layout footprint NEVER shifts or vibrates the page
+      container.innerHTML = words.map((item, idx) => `
+        <span id="headingWord_${idx}" class="word-node inline-block transition-all duration-500 ease-out opacity-0 translate-y-2 select-none ${item.isAccent ? 'gradient-text-accent font-extrabold' : 'text-white font-bold'}">
+          ${item.word}
+        </span>
+      `).join(' ');
+
+      headingWordIndex = 0;
+      headingTimer = setTimeout(revealNextWord, 120);
+    }
+
+    function revealNextWord() {
+      clearTimeout(headingTimer);
+      const container = document.getElementById('loopingHeroHeading');
+      if (!container) return;
+      const words = wordAnimationData[currentLang] || wordAnimationData.en;
+      const node = document.getElementById(`headingWord_${headingWordIndex}`);
+
+      if (node && headingWordIndex < words.length) {
+        node.style.opacity = '1';
+        node.style.transform = 'translateY(0px)';
+
+        const isAccent = words[headingWordIndex]?.isAccent;
+        headingWordIndex++;
+        const nextDelay = isAccent ? 230 : 190;
+        headingTimer = setTimeout(revealNextWord, nextDelay);
+      } else {
+        // Hold visible for 3.5 seconds for comfortable reading
+        headingTimer = setTimeout(() => {
+          const allNodes = container.querySelectorAll('.word-node');
+          allNodes.forEach(n => {
+            n.style.opacity = '0';
+            n.style.transform = 'translateY(-4px)';
+          });
+
+          // Reset position silently without clearing innerHTML, then loop again
+          headingTimer = setTimeout(() => {
+            allNodes.forEach(n => {
+              n.style.transform = 'translateY(8px)';
+            });
+            headingWordIndex = 0;
+            headingTimer = setTimeout(revealNextWord, 200);
+          }, 450);
+        }, 3500);
+      }
+    }
+
+    function runHeadingLoop() {
+      setupHeadingNodes();
+    }
+
+    // Interactive FAQ Accordion
+    function toggleFaq(index) {
+      const targetAns = document.getElementById(`faqA${index}`);
+      const targetIcon = document.getElementById(`faqIcon${index}`);
+      if (!targetAns) return;
+      const isCurrentlyHidden = targetAns.classList.contains('hidden');
+
+      // Close all other FAQs for clean single-accordion UX
+      for (let i = 0; i < 4; i++) {
+        const a = document.getElementById(`faqA${i}`);
+        const ic = document.getElementById(`faqIcon${i}`);
+        if (a && i !== index) {
+          a.classList.add('hidden');
+          if (ic) ic.classList.remove('rotate-180', 'text-rose-400');
+        }
+      }
+
+      if (isCurrentlyHidden) {
+        targetAns.classList.remove('hidden');
+        if (targetIcon) targetIcon.classList.add('rotate-180', 'text-rose-400');
+      } else {
+        targetAns.classList.add('hidden');
+        if (targetIcon) targetIcon.classList.remove('rotate-180', 'text-rose-400');
+      }
+    }
+
+    function updateLanguageUI() {
+      const t = i18n[currentLang];
+      document.getElementById('heroBadgeText').textContent = t.heroBadge;
+      document.getElementById('heroSubtitle').textContent = t.heroSubtitle;
+      document.getElementById('fetchBtnText').textContent = t.fetchBtn;
+      document.getElementById('langToggleBtn').textContent = currentLang === 'en' ? 'BN / EN' : 'EN / বাংলা';
+
+      // Update FAQ bilingual texts
+      const fb = document.getElementById('faqBadgeText');
+      const fh = document.getElementById('faqHeadingText');
+      const fs = document.getElementById('faqSubtitleText');
+      if (fb) fb.textContent = t.faqBadge;
+      if (fh) fh.textContent = t.faqHeading;
+      if (fs) fs.textContent = t.faqSubtitle;
+      for (let i = 0; i < 4; i++) {
+        const qEl = document.getElementById(`faqQ${i}`);
+        const aEl = document.getElementById(`faqAText${i}`);
+        if (qEl) qEl.textContent = t[`faqQ${i}`];
+        if (aEl) aEl.textContent = t[`faqA${i}`];
+      }
+    }
+
+    function toggleLanguage() {
+      currentLang = currentLang === 'en' ? 'bn' : 'en';
+      localStorage.setItem('snaprill_lang', currentLang);
+      updateLanguageUI();
+      runHeadingLoop();
+    }
+
+    // Mode Toggle (Single vs Batch)
+    function toggleBatchMode() {
+      isBatchMode = !isBatchMode;
+      const singleSec = document.getElementById('singleModeSection');
+      const batchSec = document.getElementById('batchModeSection');
+      const btn = document.getElementById('modeToggleBtn');
+      const icon = document.getElementById('modeIcon');
+      const text = document.getElementById('modeText');
+
+      if (isBatchMode) {
+        singleSec.classList.add('hidden');
+        batchSec.classList.remove('hidden');
+        btn.classList.add('bg-rose-500/20', 'border-rose-500/40', 'text-rose-300');
+        icon.textContent = '🔗';
+        text.textContent = 'Single Mode';
+      } else {
+        singleSec.classList.remove('hidden');
+        batchSec.classList.add('hidden');
+        btn.classList.remove('bg-rose-500/20', 'border-rose-500/40', 'text-rose-300');
+        icon.textContent = '📦';
+        text.textContent = 'Batch Mode';
+      }
+    }
+
+    // Clipboard Paste Helper
+    async function pasteFromClipboard() {
+      try {
+        if (navigator.clipboard && navigator.clipboard.readText) {
+          const text = await navigator.clipboard.readText();
+          if (text) {
+            const input = document.getElementById('urlInput');
+            input.value = text.trim();
+            document.getElementById('clearInputBtn').classList.remove('hidden');
+            handleResolve();
+          }
+        }
+      } catch (err) {
+        console.warn('Clipboard read error:', err);
+      }
+    }
+
+    function clearInput() {
+      document.getElementById('urlInput').value = '';
+      document.getElementById('clearInputBtn').classList.add('hidden');
+    }
+
+    document.getElementById('urlInput').addEventListener('input', function() {
+      const clearBtn = document.getElementById('clearInputBtn');
+      if (this.value) clearBtn.classList.remove('hidden');
+      else clearBtn.classList.add('hidden');
+    });
+
+    document.getElementById('urlInput').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') handleResolve();
+    });
+
+    function showError(msg) {
+      const alert = document.getElementById('errorAlert');
+      document.getElementById('errorMessageText').textContent = msg;
+      alert.classList.remove('hidden');
+    }
+
+    function hideError() {
+      document.getElementById('errorAlert').classList.add('hidden');
+    }
+
+    // Sample Presets
+    function loadSample(id) {
+      document.getElementById('urlInput').value = `sample:${id}`;
+      document.getElementById('clearInputBtn').classList.remove('hidden');
+      handleResolve();
+    }
+
+    // Resolve Video Handler
+    async function handleResolve(explicitUrl) {
+      hideError();
+      const inputVal = (explicitUrl || document.getElementById('urlInput').value || '').trim();
+      if (!inputVal) {
+        showError(currentLang === 'en' ? 'Please paste a valid video URL.' : 'দয়া করে একটি সঠিক ভিডিও লিংক পেস্ট করুন।');
+        return;
+      }
+
+      const fetchBtn = document.getElementById('fetchBtn');
+      const spinner = document.getElementById('fetchBtnSpinner');
+      const btnText = document.getElementById('fetchBtnText');
+      fetchBtn.disabled = true;
+      spinner.classList.remove('hidden');
+      btnText.textContent = 'Analyzing...';
+
+      try {
+        const targetEndpoint = `${API_BASE}/api/resolve`;
+        const res = await fetch(targetEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: inputVal })
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.success || !data.data) {
+          throw new Error(data.error || 'Failed to extract video information.');
+        }
+
+        renderVideoResults(data.data);
+      } catch (err) {
+        console.error('Resolve error:', err);
+        showError(err.message || 'Could not fetch video. Please check the URL.');
+      } finally {
+        fetchBtn.disabled = false;
+        spinner.classList.add('hidden');
+        btnText.textContent = i18n[currentLang].fetchBtn;
+      }
+    }
+
+    // Render Video Card
+    function renderVideoResults(item) {
+      currentVideoData = item;
+      document.getElementById('resultsSection').classList.remove('hidden');
+      
+      // Title, author, stats
+      document.getElementById('resTitle').textContent = item.title || 'Extracted Video';
+      document.getElementById('resAuthor').textContent = item.author || '@creator';
+      document.getElementById('resAvatar').src = item.authorAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(item.author || 'User')}&background=f43f5e&color=fff`;
+      document.getElementById('resViews').textContent = `👁️ ${item.views || 'Viral'}`;
+      document.getElementById('resLikes').textContent = `❤️ ${item.likes || 'Active'}`;
+      
+      const platBadge = document.getElementById('resPlatformBadge');
+      platBadge.textContent = `${(item.platform || 'General').toUpperCase()} REEL`;
+
+      // Set clean default filename
+      const cleanName = (item.title || 'SnapRill_Video')
+        .slice(0, 30)
+        .replace(/[^a-zA-Z0-9_-]/g, '_');
+      document.getElementById('customFilenameInput').value = cleanName;
+
+      // Video Preview Setup
+      const videoPlayer = document.getElementById('previewVideoPlayer');
+      const iframePlayer = document.getElementById('previewIframePlayer');
+      const thumbImg = document.getElementById('previewThumbnailImg');
+      const playOverlay = document.getElementById('playOverlayBtn');
+
+      thumbImg.src = item.coverUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80';
+      thumbImg.classList.remove('hidden');
+      videoPlayer.classList.add('hidden');
+      videoPlayer.pause();
+      if (iframePlayer) {
+        iframePlayer.src = '';
+        iframePlayer.classList.add('hidden');
+      }
+      playOverlay.classList.remove('hidden');
+
+      const durBadge = document.getElementById('previewDurationBadge');
+      const startSlider = document.getElementById('trimStartSlider');
+      const endSlider = document.getElementById('trimEndSlider');
+
+      // Helper for accurate duration formatting (MM:SS or HH:MM:SS)
+      window.formatVideoDuration = function(totalSeconds) {
+        if (!totalSeconds || isNaN(totalSeconds) || totalSeconds <= 0) return '00:00';
+        const total = Math.round(totalSeconds);
+        const hours = Math.floor(total / 3600);
+        const minutes = Math.floor((total % 3600) / 60);
+        const seconds = total % 60;
+        if (hours > 0) {
+          return `${hours}:${minutes < 10 ? '0' : ''}${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+        }
+        return `${minutes < 10 ? '0' : ''}${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+      };
+
+      window.updateDurationUI = function(sec) {
+        if (!sec || isNaN(sec) || sec <= 0) return;
+        const rounded = Math.round(sec);
+        if (durBadge) durBadge.textContent = window.formatVideoDuration(rounded);
+        if (startSlider && endSlider) {
+          startSlider.max = rounded;
+          endSlider.max = rounded;
+          startSlider.value = 0;
+          endSlider.value = rounded;
+          onTrimSliderChange();
+        }
+      };
+
+      // 1. Initial duration check from stream URL parameters or item metadata
+      let initialDur = 0;
+      const streamUrl = item.videoUrl || item.audioUrl || '';
+      if (streamUrl) {
+        const m = streamUrl.match(/[?&]dur=([0-9.]+)/i);
+        if (m && parseFloat(m[1])) {
+          initialDur = Math.round(parseFloat(m[1]));
+        }
+      }
+      if (!initialDur && item.duration && typeof item.duration === 'number' && item.duration > 0 && item.duration !== 30) {
+        initialDur = Math.round(item.duration);
+      } else if (!initialDur && item.duration && item.duration === 30 && item.platform !== 'youtube') {
+        initialDur = 30;
+      }
+
+      if (initialDur > 0) {
+        window.updateDurationUI(initialDur);
+      } else {
+        durBadge.textContent = '00:15';
+        startSlider.max = 30;
+        endSlider.max = 30;
+        startSlider.value = 0;
+        endSlider.value = 15;
+        onTrimSliderChange();
+      }
+
+      // 2. Real-time HTML5 video metadata listener for exact file duration
+      videoPlayer.onloadedmetadata = function() {
+        if (videoPlayer.duration && !isNaN(videoPlayer.duration) && isFinite(videoPlayer.duration) && videoPlayer.duration > 0) {
+          window.updateDurationUI(videoPlayer.duration);
+        }
+      };
+
+      // 3. Silently probe direct media stream in background to resolve exact duration immediately
+      if (streamUrl && streamUrl.startsWith('http')) {
+        try {
+          const probe = document.createElement('video');
+          probe.preload = 'metadata';
+          probe.src = streamUrl.startsWith('http')
+            ? `${API_BASE}/api/proxy-stream?url=${encodeURIComponent(streamUrl)}`
+            : streamUrl;
+          probe.onloadedmetadata = function() {
+            if (probe.duration && !isNaN(probe.duration) && isFinite(probe.duration) && probe.duration > 0) {
+              window.updateDurationUI(probe.duration);
+            }
+          };
+        } catch (probeErr) {}
+      }
+
+      // Reset AI Output box
+      document.getElementById('aiOutputText').value = '';
+
+      // Save to History
+      addToHistory(item);
+
+      // Smooth scroll to results
+      document.getElementById('resultsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    // Interactive Video Preview (Plays from beginning till end, stops/pauses on click)
+    function toggleVideoPlayback() {
+      if (!currentVideoData) return;
+      const videoPlayer = document.getElementById('previewVideoPlayer');
+      const iframePlayer = document.getElementById('previewIframePlayer');
+      const thumbImg = document.getElementById('previewThumbnailImg');
+      const playOverlay = document.getElementById('playOverlayBtn');
+
+      // 1. YouTube Video Preview (iframe player):
+      if (currentVideoData.platform === 'youtube' && currentVideoData.id) {
+        if (!iframePlayer.classList.contains('hidden')) {
+          // If playing, clicking stops/pauses it
+          iframePlayer.src = '';
+          iframePlayer.classList.add('hidden');
+          thumbImg.classList.remove('hidden');
+          playOverlay.classList.remove('hidden');
+        } else {
+          // Start playing YouTube video till the end
+          iframePlayer.src = `https://www.youtube-nocookie.com/embed/${currentVideoData.id}?autoplay=1&rel=0&modestbranding=1&enablejsapi=1`;
+          thumbImg.classList.add('hidden');
+          playOverlay.classList.add('hidden');
+          videoPlayer.classList.add('hidden');
+          iframePlayer.classList.remove('hidden');
+        }
+        return;
+      }
+
+      // 2. Direct MP4 (Instagram Reels, TikTok, Facebook Watch, Uploaded assets):
+      const streamUrl = currentVideoData.videoUrl || currentVideoData.audioUrl;
+      if (streamUrl) {
+        if (!videoPlayer.classList.contains('hidden')) {
+          // Toggle play / pause on click
+          if (videoPlayer.paused) {
+            videoPlayer.play();
+            playOverlay.classList.add('hidden');
+          } else {
+            videoPlayer.pause();
+            playOverlay.classList.remove('hidden');
+          }
+        } else {
+          // Start playing video
+          const proxied = streamUrl.startsWith('http')
+            ? `${API_BASE}/api/proxy-stream?url=${encodeURIComponent(streamUrl)}`
+            : streamUrl;
+          videoPlayer.src = proxied;
+          thumbImg.classList.add('hidden');
+          playOverlay.classList.add('hidden');
+          if (iframePlayer) iframePlayer.classList.add('hidden');
+          videoPlayer.classList.remove('hidden');
+          videoPlayer.play().catch(e => console.warn('Play error:', e));
+
+          // Clicking directly on video screen toggles pause/stop
+          videoPlayer.onclick = () => {
+            if (videoPlayer.paused) {
+              videoPlayer.play();
+              playOverlay.classList.add('hidden');
+            } else {
+              videoPlayer.pause();
+              playOverlay.classList.remove('hidden');
+            }
+          };
+
+          videoPlayer.onended = () => {
+            playOverlay.classList.remove('hidden');
+          };
+        }
+      }
+    }
+
+    // Direct Browser Download Helper (Universal Android & PC compatible)
+    function triggerDirectDownload(quality, ext = 'mp4') {
+      if (!currentVideoData) return;
+      const baseFilename = document.getElementById('customFilenameInput').value.trim() || 'SnapRill_Video';
+      const cleanFilename = `${baseFilename}_${quality}.${ext}`;
+      
+      const isMediaUrl = (u) => u && typeof u === 'string' && (u.startsWith('http') || u.startsWith('/assets/')) && !u.includes('ytimg.com') && !/\.(jpg|jpeg|png|webp)(\?|$)/i.test(u);
+      let streamUrl = isMediaUrl(currentVideoData.videoUrl) ? currentVideoData.videoUrl : '';
+      if (!streamUrl && currentVideoData.formats) {
+        const found = currentVideoData.formats.find(f => !f.isImageCover && isMediaUrl(f.url));
+        if (found) streamUrl = found.url;
+      }
+
+      // Check for YouTube dedicated endpoint
+      if (currentVideoData.platform === 'youtube' && currentVideoData.id) {
+        const dlUrl = `${API_BASE}/api/download-youtube?id=${encodeURIComponent(currentVideoData.id)}&format=${quality === 'sd' ? '720' : '1080'}&filename=${encodeURIComponent(cleanFilename)}&url=${encodeURIComponent(streamUrl || '')}`;
+        executeDownload(dlUrl, cleanFilename, streamUrl);
+        return;
+      }
+
+      const dlUrl = `${API_BASE}/api/download-clean?url=${encodeURIComponent(streamUrl || '')}&filename=${encodeURIComponent(cleanFilename)}`;
+      executeDownload(dlUrl, cleanFilename, streamUrl);
+    }
+
+    // Audio Extraction Download
+    function triggerAudioExtraction() {
+      if (!currentVideoData) return;
+      const baseFilename = document.getElementById('customFilenameInput').value.trim() || 'SnapRill_Audio';
+      const cleanFilename = `${baseFilename}_extracted.mp3`;
+
+      let streamUrl = currentVideoData.audioUrl || currentVideoData.videoUrl;
+      if (currentVideoData.platform === 'youtube' && currentVideoData.id) {
+        const dlUrl = `${API_BASE}/api/download-youtube?id=${encodeURIComponent(currentVideoData.id)}&format=mp3&filename=${encodeURIComponent(cleanFilename)}&url=${encodeURIComponent(streamUrl || '')}`;
+        executeDownload(dlUrl, cleanFilename, streamUrl);
+        return;
+      }
+
+      const dlUrl = `${API_BASE}/api/extract-audio?url=${encodeURIComponent(streamUrl || '')}&filename=${encodeURIComponent(cleanFilename)}`;
+      executeDownload(dlUrl, cleanFilename, streamUrl);
+    }
+
+    // Trimmed Download
+    function triggerTrimmedDownload(format = 'mp4') {
+      if (!currentVideoData) return;
+      const startTime = parseFloat(document.getElementById('trimStartSlider').value);
+      const endTime = parseFloat(document.getElementById('trimEndSlider').value);
+      const baseFilename = document.getElementById('customFilenameInput').value.trim() || 'SnapRill_Trimmed';
+      const cleanFilename = `${baseFilename}_${Math.round(startTime)}s_${Math.round(endTime)}s.${format}`;
+
+      const streamUrl = currentVideoData.videoUrl || currentVideoData.audioUrl || '';
+      const ytId = (currentVideoData.platform === 'youtube' && currentVideoData.id) ? currentVideoData.id : '';
+
+      const dlUrl = `${API_BASE}/api/download-trim?url=${encodeURIComponent(streamUrl)}&ytId=${encodeURIComponent(ytId)}&start=${startTime}&end=${endTime}&format=${format}&filename=${encodeURIComponent(cleanFilename)}`;
+      executeDownload(dlUrl, cleanFilename, streamUrl);
+    }
+
+    let downloadToastTimeout = null;
+
+    // Core File Download Trigger (Eliminates "Resume / Site wasn't available" error by verifying stream and serving via Blob)
+    async function executeDownload(endpointUrl, filename, fallbackUrl) {
+      const toast = document.getElementById('downloadToast');
+      const toastText = document.getElementById('downloadToastText');
+
+      // 1. INSTANT NOTIFICATION FEEDBACK AT 0 MILLISECOND:
+      clearTimeout(downloadToastTimeout);
+      toastText.textContent = i18n[currentLang].toastDownload;
+      toast.classList.remove('hidden');
+
+      if (window.confetti) {
+        try {
+          window.confetti({
+            particleCount: 65,
+            spread: 60,
+            origin: { y: 0.8 },
+            colors: ['#f43f5e', '#ec4899', '#6366f1', '#06b6d4']
+          });
+        } catch (cErr) {}
+      }
+
+      downloadToastTimeout = setTimeout(() => {
+        toast.classList.add('hidden');
+      }, 7000);
+
+      try {
+        let resp = await fetch(endpointUrl);
+        
+        // If primary download endpoint returned error, attempt fallback to clean download
+        if (!resp.ok && fallbackUrl && typeof fallbackUrl === 'string' && fallbackUrl.startsWith('http') && !endpointUrl.includes('download-clean')) {
+          try {
+            const cleanDl = `${API_BASE}/api/download-clean?url=${encodeURIComponent(fallbackUrl)}&filename=${encodeURIComponent(filename)}`;
+            const cleanResp = await fetch(cleanDl);
+            if (cleanResp.ok) {
+              resp = cleanResp;
+            }
+          } catch {}
+        }
+
+        if (!resp.ok) {
+          toast.classList.add('hidden');
+          const errText = (await resp.text().catch(() => '')) || '';
+          const isCopyrightOrBlocked = errText.includes('YouTube stream') || errText.includes('Could not fetch original') || errText.includes('restricted') || errText.includes('blocked');
+          const friendlyMsg = isCopyrightOrBlocked
+            ? (currentLang === 'bn'
+                ? '⚠️ এই নির্দিষ্ট ভিডিওটি কপিরাইট যুক্ত বা ইউটিউব প্ল্যাটফর্মে সুরক্ষিত রয়েছে। অনুগ্রহ করে অন্য কোনো রিলস বা শর্টস চেষ্টা করুন।'
+                : '⚠️ This specific video has copyright protection or restrictions on YouTube. Please try another video or reel.')
+            : (errText || 'Download could not complete. Please retry.');
+          showError(friendlyMsg);
+          return;
+        }
+
+        const ct = resp.headers.get('content-type') || '';
+        if (ct.includes('text') || ct.includes('json')) {
+          const err = await resp.text();
+          toast.classList.add('hidden');
+          showError('Invalid media format: ' + (err.slice(0, 120) || 'Download error'));
+          return;
+        }
+
+        // Convert verified stream directly to Blob so Chrome never gets "Site wasn't available" or "Resume"!
+        const blob = await resp.blob();
+        const blobUrl = URL.createObjectURL(blob);
+
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = filename;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          if (document.body.contains(a)) document.body.removeChild(a);
+          URL.revokeObjectURL(blobUrl);
+        }, 5000);
+
+      } catch (e) {
+        console.warn('Blob download fetch error, attempting direct stream anchor:', e);
+        const directUrl = fallbackUrl && fallbackUrl.startsWith('http') ? fallbackUrl : endpointUrl;
+        const a = document.createElement('a');
+        a.href = directUrl;
+        a.download = filename;
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          if (document.body.contains(a)) document.body.removeChild(a);
+          toast.classList.add('hidden');
+        }, 3000);
+      }
+    }
+
+    // Slider range update
+    function onTrimSliderChange() {
+      const startSlider = document.getElementById('trimStartSlider');
+      const endSlider = document.getElementById('trimEndSlider');
+      let startVal = parseFloat(startSlider.value);
+      let endVal = parseFloat(endSlider.value);
+
+      if (startVal >= endVal) {
+        startVal = Math.max(0, endVal - 0.5);
+        startSlider.value = startVal;
+      }
+
+      document.getElementById('startTimeDisplay').textContent = `${startVal}s`;
+      document.getElementById('endTimeDisplay').textContent = `${endVal}s`;
+      const diff = (endVal - startVal).toFixed(1);
+      document.getElementById('trimDurationBadge').textContent = `${startVal}s - ${endVal}s (${diff}s selected)`;
+    }
+
+    // Gemini AI Platform Generator (Only generates when user explicitly clicks Generate button)
+    function selectAiPlatform(platform) {
+      selectedAiPlatform = platform;
+      document.querySelectorAll('.ai-tab').forEach(tab => {
+        tab.className = 'ai-tab px-3 py-1.5 rounded-lg text-xs font-bold smooth-button bg-slate-800 text-slate-400 border border-transparent hover:text-white';
+      });
+      const activeTab = document.getElementById(`tab-${platform}`);
+      if (activeTab) {
+        activeTab.className = 'ai-tab px-3 py-1.5 rounded-lg text-xs font-bold smooth-button bg-rose-500/20 text-rose-400 border border-rose-500/40 shadow-sm shadow-rose-500/20';
+      }
+      
+      const outArea = document.getElementById('aiOutputText');
+      const platformNames = {
+        instagram: 'Instagram Reels',
+        youtube: 'YouTube Shorts',
+        tiktok: 'TikTok Viral',
+        facebook: 'Facebook Watch'
+      };
+      outArea.placeholder = `📌 Selected: ${platformNames[platform] || platform}. Click '⚡ Generate Now' above to generate viral hooks, captions & hashtags with Gemini AI.`;
+      outArea.value = '';
+    }
+
+    async function generateAiFormat() {
+      if (!currentVideoData) {
+        showError('Please resolve a video first before generating formats.');
+        return;
+      }
+      const spinner = document.getElementById('aiBtnSpinner');
+      const outArea = document.getElementById('aiOutputText');
+      spinner.classList.remove('hidden');
+      outArea.value = `⚡ Analyzing with Google Gemini AI for ${selectedAiPlatform.toUpperCase()}...`;
+
+      try {
+        const storedKey = localStorage.getItem('user_gemini_api_key') || '';
+        const validKey = (storedKey && !storedKey.startsWith('AQ.')) ? storedKey.trim() : undefined;
+        const res = await fetch(`${API_BASE}/api/ai-analyze`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: currentVideoData.title,
+            platform: currentVideoData.platform,
+            author: currentVideoData.author,
+            language: currentLang,
+            targetPlatform: selectedAiPlatform,
+            apiKey: validKey,
+          })
+        });
+
+        const data = await res.json();
+        if (data.success && data.data?.formattedContent) {
+          outArea.value = data.data.formattedContent;
+        } else {
+          outArea.value = `Viral Format for ${selectedAiPlatform.toUpperCase()}:\n\n` +
+            `🔥 ${currentVideoData.title || 'Trending Video'}\n\n` +
+            `Credits to ${currentVideoData.author || '@creator'}\n\n` +
+            `#${selectedAiPlatform} #reels #viral #explore #trending #hd`;
+        }
+      } catch (err) {
+        console.warn('AI format error:', err);
+        outArea.value = `Viral Format for ${selectedAiPlatform.toUpperCase()}:\n\n` +
+          `🔥 ${currentVideoData.title || 'Check out this trending video!'}\n\n` +
+          `Credits to ${currentVideoData.author || '@creator'}\n\n` +
+          `#${selectedAiPlatform} #reels #viral #explore #trending #hd`;
+      } finally {
+        spinner.classList.add('hidden');
+      }
+    }
+
+    function copyAiContent() {
+      const text = document.getElementById('aiOutputText').value;
+      if (!text) return;
+      navigator.clipboard.writeText(text).then(() => {
+        const btnText = document.getElementById('copyAiBtnText');
+        btnText.textContent = 'Copied!';
+        setTimeout(() => { btnText.textContent = 'Copy'; }, 2000);
+      });
+    }
+
+    // Batch Downloader Logic
+    function updateBatchCount() {
+      const lines = document.getElementById('batchTextarea').value
+        .split('\n')
+        .map(l => l.trim())
+        .filter(l => l.length > 5);
+      document.getElementById('batchCountBadge').textContent = `${lines.length} URLs`;
+    }
+
+    function loadBatchDemo() {
+      const demoUrls = [
+        'sample:sample-insta-1',
+        'sample:sample-yt-1',
+        'sample:sample-tiktok-1'
+      ].join('\n');
+      document.getElementById('batchTextarea').value = demoUrls;
+      updateBatchCount();
+    }
+
+    async function startBatchProcessing() {
+      const lines = document.getElementById('batchTextarea').value
+        .split('\n')
+        .map(l => l.trim())
+        .filter(l => l.length > 5);
+
+      if (lines.length === 0) {
+        showError('Please enter at least one video link in the batch box.');
+        return;
+      }
+
+      const spinner = document.getElementById('batchBtnSpinner');
+      const btnText = document.getElementById('batchBtnText');
+      const resultsContainer = document.getElementById('batchResultsList');
+      resultsContainer.innerHTML = '';
+      spinner.classList.remove('hidden');
+      btnText.textContent = 'Processing...';
+
+      for (let i = 0; i < lines.length; i++) {
+        const url = lines[i];
+        const itemCard = document.createElement('div');
+        itemCard.className = 'bg-slate-900 border border-slate-800 p-3.5 rounded-xl flex items-center justify-between gap-3 animate-pulse';
+        itemCard.id = `batch-item-${i}`;
+        itemCard.innerHTML = `
+          <div class="flex items-center gap-3 overflow-hidden">
+            <span class="text-xs font-mono font-bold text-slate-500">#${i + 1}</span>
+            <div class="truncate text-xs text-slate-300 font-mono">${url}</div>
+          </div>
+          <span class="text-xs text-rose-400">Loading...</span>
+        `;
+        resultsContainer.appendChild(itemCard);
+
+        try {
+          const res = await fetch(`${API_BASE}/api/resolve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url })
+          });
+          const json = await res.json();
+          if (json.success && json.data) {
+            const v = json.data;
+            itemCard.className = 'bg-slate-900 border border-slate-800 p-3.5 rounded-xl flex items-center justify-between gap-3';
+            itemCard.innerHTML = `
+              <div class="flex items-center gap-3 overflow-hidden">
+                <img src="${v.coverUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=120'}" class="w-10 h-10 rounded-lg object-cover" />
+                <div class="truncate">
+                  <div class="text-xs font-bold text-white truncate">${v.title}</div>
+                  <div class="text-[11px] text-slate-400">${v.author || '@creator'} • ${v.platform}</div>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <button onclick="renderVideoResults(${JSON.stringify(v).replace(/"/g, '&quot;')})" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs text-slate-200">
+                  Open Studio
+                </button>
+                <a href="${API_BASE}/api/download-clean?url=${encodeURIComponent(v.videoUrl || '')}&filename=Batch_${i + 1}.mp4" download="Batch_${i + 1}.mp4" class="px-3 py-1 rounded bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs flex items-center gap-1">
+                  <span>📥</span> Download
+                </a>
+              </div>
+            `;
+          }
+        } catch {
+          itemCard.className = 'bg-rose-950/20 border border-rose-900/50 p-3 rounded-xl flex items-center justify-between text-xs text-rose-400';
+          itemCard.innerHTML = `<span>#${i + 1} Failed to resolve</span><span class="text-slate-500 truncate">${url}</span>`;
+        }
+      }
+
+      spinner.classList.add('hidden');
+      btnText.textContent = i18n[currentLang].batchBtn;
+    }
+
+    // History Logic
+    function addToHistory(item) {
+      downloadHistory = [item, ...downloadHistory.filter(h => h.id !== item.id)].slice(0, 15);
+      try {
+        localStorage.setItem('snaprill_history', JSON.stringify(downloadHistory));
+      } catch {}
+      renderHistoryDrawer();
+    }
+
+    function renderHistoryDrawer() {
+      const container = document.getElementById('historyItemsContainer');
+      const badge = document.getElementById('historyBadge');
+      if (downloadHistory.length > 0) {
+        badge.classList.remove('hidden');
+        container.innerHTML = downloadHistory.map(item => `
+          <div class="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2.5 overflow-hidden">
+              <img src="${item.coverUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=100'}" class="w-10 h-10 rounded-lg object-cover" />
+              <div class="truncate">
+                <div class="text-xs font-bold text-white truncate">${item.title}</div>
+                <div class="text-[10px] text-slate-400">${item.platform} • ${item.author}</div>
+              </div>
+            </div>
+            <button onclick="renderVideoResults(${JSON.stringify(item).replace(/"/g, '&quot;')}); toggleHistoryDrawer();" class="px-2.5 py-1 rounded bg-slate-800 text-xs text-rose-400 font-bold hover:bg-slate-700">
+              View
+            </button>
+          </div>
+        `).join('');
+      } else {
+        badge.classList.add('hidden');
+        container.innerHTML = '<div class="text-center text-xs text-slate-500 py-8">No download history yet.</div>';
+      }
+    }
+
+    function toggleHistoryDrawer() {
+      const drawer = document.getElementById('historyDrawer');
+      drawer.classList.toggle('hidden');
+      renderHistoryDrawer();
+    }
+
+    function clearHistory() {
+      downloadHistory = [];
+      localStorage.removeItem('snaprill_history');
+      renderHistoryDrawer();
+    }
+
+    // File Export Helpers (accessible via API / URL)
+
+    async function copyEntireIndexHtml() {
+      try {
+        let html = '';
+        try {
+          const res = await fetch(`${API_BASE || ''}/api/get-index-html`);
+          if (res.ok) html = await res.text();
+        } catch {}
+        if (!html) {
+          const res = await fetch(window.location.href);
+          html = await res.text();
+        }
+        await navigator.clipboard.writeText(html);
+        const textSpan = document.getElementById('copyFullCodeText');
+        textSpan.textContent = 'Copied to Clipboard! ✅';
+        setTimeout(() => { textSpan.textContent = 'Copy Entire index.html Code'; }, 2500);
+      } catch (err) {
+        console.warn('Copy file error:', err);
+      }
+    }
+
+    function downloadIndexHtmlFile() {
+      window.location.href = `${API_BASE || ''}/api/get-index-html`;
+    }
+    function downloadServerTsFile() {
+      window.location.href = `${API_BASE || ''}/api/get-server-ts`;
+    }
+    function downloadPackageJsonFile() {
+      window.location.href = `${API_BASE || ''}/api/get-package-json`;
+    }
+
+    // Init
+    updateLanguageUI();
+    renderHistoryDrawer();
+    runHeadingLoop();
+  </script>
+</body>
+</html>
