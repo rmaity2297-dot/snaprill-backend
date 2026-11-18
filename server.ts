@@ -86,11 +86,11 @@ function isFacebookUrl(url: string): boolean {
 }
 
 // Helper: Extract real media stream using yt-dlp binary
-function extractWithYtDlp(url: string): Promise<any> {
+function runYtDlpJson(args: string[]): Promise<any> {
   return new Promise((resolve) => {
     execFile(
       './bin/yt-dlp',
-      ['--js-runtimes', 'node:node', '-j', '--no-warnings', '--no-check-certificates', url],
+      args,
       { timeout: 25000 },
       (err, stdout) => {
         if (err || !stdout) {
@@ -112,6 +112,210 @@ function extractWithYtDlp(url: string): Promise<any> {
       }
     );
   });
+}
+
+async function extractWithYtDlp(url: string): Promise<any> {
+  const cookieArgs: string[] = [];
+  const cookieCandidates = [process.env.YTDLP_COOKIES_PATH, '/tmp/yt_cookies.txt', './cookies.txt'].filter(Boolean) as string[];
+  for (const cPath of cookieCandidates) {
+    if (fs.existsSync(cPath)) {
+      cookieArgs.push('--cookies', cPath);
+      break;
+    }
+  }
+
+  const baseArgs = ['--js-runtimes', 'node:node', '-j', '--no-warnings', '--no-check-certificates', ...cookieArgs];
+  const primary = await runYtDlpJson([...baseArgs, url]);
+  if (primary) return primary;
+
+  if (url.includes('youtube.com') || url.includes('youtu.be')) {
+    return await runYtDlpJson([
+      ...baseArgs,
+      '--extractor-args',
+      'youtube:player_client=ios,android_vr,mweb,web',
+      url,
+    ]);
+  }
+  return null;
+}
+
+// Helper: Parse HH:MM:SS or MM:SS duration string to seconds
+function parseClockDuration(text: string): number {
+  const parts = String(text || '').trim().split(':').map((n) => parseInt(n, 10));
+  if (parts.some((n) => isNaN(n))) return 0;
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return parts[0] * 60 + parts[1];
+  if (parts.length === 1) return parts[0];
+  return 0;
+}
+
+// Helper: Fetch actual YouTube video duration (works even when watch page triggers bot-check)
+async function fetchYouTubeDurationSeconds(ytId: string): Promise<number> {
+  try {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 5000);
+    const resp = await fetch(`https://www.youtube.com/results?search_query=${encodeURIComponent(ytId)}`, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+    });
+    clearTimeout(t);
+    if (!resp.ok) return 0;
+    const html = await resp.text();
+    const idx = html.indexOf(`"videoId":"${ytId}"`);
+    if (idx !== -1) {
+      const slice = html.slice(idx, idx + 8000);
+      const m = slice.match(/"lengthText":\{.*?"simpleText":"([0-9:]+)"/);
+      if (m && m[1]) {
+        const secs = parseClockDuration(m[1]);
+        if (secs > 0) return secs;
+      }
+    }
+  } catch {}
+  return 0;
+}
+
+// Helper: Verify a YouTube stream URL is reachable from this server IP; if IP-locked (403 on googlevideo.com), wrap via vidsnap proxy
+async function ensureAccessibleYouTubeUrl(url?: string): Promise<string | undefined> {
+  if (!url || !url.startsWith('http')) return undefined;
+  const probe = async (target: string, timeoutMs: number): Promise<boolean> => {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      const r = await fetch(target, {
+        headers: {
+          Range: 'bytes=0-63',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+        },
+        signal: ctrl.signal,
+      });
+      clearTimeout(timer);
+      const ct = (r.headers.get('content-type') || '').toLowerCase();
+      try { await r.body?.cancel(); } catch {}
+      return r.ok && !ct.includes('json') && !ct.includes('html') && !ct.includes('text/plain');
+    } catch {
+      return false;
+    }
+  };
+
+  if (await probe(url, 4000)) {
+    return url;
+  }
+
+  if (url.includes('googlevideo.com') && !url.includes('api.vidsnap.app/proxy')) {
+    const proxied = `https://api.vidsnap.app/proxy?u=${encodeURIComponent(url)}`;
+    if (await probe(proxied, 5500)) {
+      return proxied;
+    }
+  }
+
+  return undefined;
+}
+
+// Helper: Extract YouTube metadata & direct streams via Clipto YouTube API (works reliably on cloud/datacenter IPs)
+async function extractYouTubeWithClipto(ytId: string): Promise<{
+  title?: string;
+  author?: string;
+  thumbnail?: string;
+  duration?: number;
+  muxedMp4Url?: string;
+  hdVideoUrl?: string;
+  audioUrl?: string;
+} | null> {
+  let bestMeta: {
+    title?: string;
+    author?: string;
+    thumbnail?: string;
+    duration?: number;
+    muxedMp4Url?: string;
+    hdVideoUrl?: string;
+    audioUrl?: string;
+  } | null = null;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 9000);
+      const resp = await fetch('https://www.clipto.com/api/youtube', {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+        },
+        body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${ytId}` }),
+      });
+      clearTimeout(t);
+      if (!resp.ok) continue;
+      const d: any = await resp.json();
+      if (!d || !d.success || !Array.isArray(d.medias)) continue;
+
+      const medias: any[] = d.medias;
+      const isMp4 = (m: any) => (m.extension || m.ext) === 'mp4';
+
+      // Prefer highest-resolution progressive MP4 with audio
+      const muxedList = medias
+        .filter((m) => m.type === 'video' && isMp4(m) && m.is_audio && m.url)
+        .sort((a, b) => (b.height || 0) - (a.height || 0) || (b.bitrate || 0) - (a.bitrate || 0));
+
+      // Prefer 1080p/720p H.264 MP4 video stream for HD downloads
+      const hdList = medias
+        .filter((m) => m.type === 'video' && isMp4(m) && m.url && String(m.mimeType || '').includes('avc1'))
+        .sort((a, b) => (b.height || 0) - (a.height || 0) || (b.bitrate || 0) - (a.bitrate || 0));
+      const fallbackVideoList = medias
+        .filter((m) => m.type === 'video' && isMp4(m) && m.url)
+        .sort((a, b) => (b.height || 0) - (a.height || 0) || (b.bitrate || 0) - (a.bitrate || 0));
+
+      // Prefer AAC M4A audio stream
+      const audioList = medias
+        .filter((m) => m.type === 'audio' && m.url)
+        .sort((a, b) => {
+          const aM4a = (a.extension || a.ext) === 'm4a' ? 1 : 0;
+          const bM4a = (b.extension || b.ext) === 'm4a' ? 1 : 0;
+          if (bM4a !== aM4a) return bM4a - aM4a;
+          return (b.bitrate || 0) - (a.bitrate || 0);
+        });
+
+      const rawMuxed = muxedList[0]?.url;
+      const rawHd = hdList[0]?.url || fallbackVideoList[0]?.url;
+      const rawAudio = audioList[0]?.url;
+
+      const [muxedMp4Url, hdVideoUrl, audioUrl] = await Promise.all([
+        ensureAccessibleYouTubeUrl(rawMuxed),
+        ensureAccessibleYouTubeUrl(rawHd),
+        ensureAccessibleYouTubeUrl(rawAudio),
+      ]);
+
+      const candidate: {
+        title?: string;
+        author?: string;
+        thumbnail?: string;
+        duration?: number;
+        muxedMp4Url?: string;
+        hdVideoUrl?: string;
+        audioUrl?: string;
+      } = {
+        title: d.title || bestMeta?.title || undefined,
+        author: d.author || bestMeta?.author || undefined,
+        thumbnail: d.thumbnail || bestMeta?.thumbnail || undefined,
+        duration: (d.duration && !isNaN(Number(d.duration)) ? Math.round(Number(d.duration)) : undefined) ?? bestMeta?.duration,
+        muxedMp4Url: muxedMp4Url || bestMeta?.muxedMp4Url,
+        hdVideoUrl: hdVideoUrl || bestMeta?.hdVideoUrl,
+        audioUrl: audioUrl || bestMeta?.audioUrl,
+      };
+      bestMeta = candidate;
+
+      if ((candidate.muxedMp4Url || candidate.hdVideoUrl) && candidate.audioUrl) {
+        return candidate;
+      }
+    } catch {
+      // retry next attempt
+    }
+  }
+
+  return bestMeta;
 }
 
 import { chmodSync, existsSync, statSync } from 'fs';
@@ -314,6 +518,7 @@ app.all(['/api/resolve', '/api/resolve-video'], async (req: Request, res: Respon
         let oembedThumbnail = `https://i.ytimg.com/vi/${ytId}/maxresdefault.jpg`;
         let directMp4Url = '';
         let directMp3Url = '';
+        let ytDuration = 0;
 
         try {
           const oembedResp = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${ytId}&format=json`);
@@ -338,9 +543,52 @@ app.all(['/api/resolve', '/api/resolve-video'], async (req: Request, res: Respon
             if (ytRes.thumbnail) oembedThumbnail = ytRes.thumbnail;
             if (ytRes.mp4) directMp4Url = ytRes.mp4;
             if (ytRes.mp3) directMp3Url = ytRes.mp3;
+            if (ytRes.duration && !isNaN(Number(ytRes.duration))) ytDuration = Math.round(Number(ytRes.duration));
           }
         } catch (ytResolveErr) {
           console.warn('YouTube stream fast resolve warning:', ytResolveErr);
+        }
+
+        // Fallback to Clipto / yt-dlp / YouTube search duration so stream & actual length (40s, 1m, 2m, 5m, 6m) are always accurate
+        if (!directMp4Url || !ytDuration) {
+          try {
+            const cliptoInfo = await extractYouTubeWithClipto(ytId);
+            if (cliptoInfo) {
+              if (cliptoInfo.title) title = cliptoInfo.title;
+              if (cliptoInfo.author) author = cliptoInfo.author;
+              if (cliptoInfo.thumbnail) oembedThumbnail = cliptoInfo.thumbnail;
+              if (cliptoInfo.duration && !ytDuration) ytDuration = cliptoInfo.duration;
+              if (cliptoInfo.muxedMp4Url && !directMp4Url) directMp4Url = cliptoInfo.muxedMp4Url;
+              if (cliptoInfo.audioUrl && !directMp3Url) directMp3Url = cliptoInfo.audioUrl;
+            }
+          } catch {}
+        }
+
+        if (!directMp4Url || !ytDuration) {
+          try {
+            const [ytdlpInfo, searchedDur] = await Promise.all([
+              !directMp4Url ? extractWithYtDlp(`https://www.youtube.com/watch?v=${ytId}`) : Promise.resolve(null),
+              !ytDuration ? fetchYouTubeDurationSeconds(ytId) : Promise.resolve(0),
+            ]);
+            if (ytdlpInfo) {
+              if (ytdlpInfo.title) title = ytdlpInfo.title;
+              if (ytdlpInfo.uploader) author = ytdlpInfo.uploader;
+              if (ytdlpInfo.thumbnail) oembedThumbnail = ytdlpInfo.thumbnail;
+              if (ytdlpInfo.duration && !isNaN(Number(ytdlpInfo.duration))) {
+                ytDuration = Math.round(Number(ytdlpInfo.duration));
+              }
+              if (Array.isArray(ytdlpInfo.formats)) {
+                const muxed = ytdlpInfo.formats.find((f: any) => f.ext === 'mp4' && f.url && f.vcodec !== 'none' && f.acodec !== 'none') ||
+                              ytdlpInfo.formats.find((f: any) => f.url && f.vcodec !== 'none' && f.acodec !== 'none');
+                const audioOnly = ytdlpInfo.formats.find((f: any) => f.url && f.acodec !== 'none' && (!f.vcodec || f.vcodec === 'none'));
+                if (muxed?.url && !directMp4Url) directMp4Url = muxed.url;
+                if (audioOnly?.url && !directMp3Url) directMp3Url = audioOnly.url;
+              }
+            }
+            if (!ytDuration && searchedDur > 0) {
+              ytDuration = searchedDur;
+            }
+          } catch {}
         }
 
         const resolved = {
@@ -356,7 +604,7 @@ app.all(['/api/resolve', '/api/resolve-video'], async (req: Request, res: Respon
           videoUrl: directMp4Url || '',
           audioUrl: directMp3Url || directMp4Url || '',
           coverUrl: oembedThumbnail || `https://i.ytimg.com/vi/${ytId}/hqdefault.jpg`,
-          duration: 30,
+          duration: ytDuration,
           views: 'YouTube Shorts',
           likes: 'Viral',
           comments: 'Active',
@@ -859,12 +1107,16 @@ app.get('/api/download-youtube', async (req: Request, res: Response) => {
     const { Readable } = await import('stream');
     const { pipeline } = await import('stream/promises');
 
-    // 0. If direct stream URL is already known and passed, stream it immediately!
+    // 0. If direct stream URL is already known and passed (not 1080p mux or mp3 re-encode), stream it immediately!
     const streamUrlParam = (req.query.url as string || '').trim();
-    if (streamUrlParam && streamUrlParam.startsWith('http') && !streamUrlParam.includes('ytimg.com')) {
+    if (streamUrlParam && streamUrlParam.startsWith('http') && !streamUrlParam.includes('ytimg.com') && format !== '1080' && ext !== 'mp3') {
       try {
-        const streamResp = await fetch(streamUrlParam);
-        if (streamResp.ok && streamResp.body) {
+        let streamResp = await fetch(streamUrlParam);
+        if (!streamResp.ok && streamUrlParam.includes('googlevideo.com') && !streamUrlParam.includes('api.vidsnap.app/proxy')) {
+          streamResp = await fetch(`https://api.vidsnap.app/proxy?u=${encodeURIComponent(streamUrlParam)}`);
+        }
+        const ct = (streamResp.headers.get('content-type') || '').toLowerCase();
+        if (streamResp.ok && streamResp.body && !ct.includes('json') && !ct.includes('html')) {
           res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
           res.setHeader('Content-Type', mimeType);
           res.setHeader('Content-Transfer-Encoding', 'binary');
@@ -904,18 +1156,144 @@ app.get('/api/download-youtube', async (req: Request, res: Response) => {
       // Graceful fallback to secondary extractor
     }
 
-    // 2. Try direct extraction via yt-dlp binary if available
+    // 2. Primary cloud-friendly extractor via Clipto YouTube API (with automatic proxy fallback for IP-locked streams)
+    try {
+      const clipto = await extractYouTubeWithClipto(ytId);
+      const downloadToTmp = async (url: string, destPath: string): Promise<boolean> => {
+        try {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 25000);
+          const r = await fetch(url, {
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36' },
+            signal: ctrl.signal,
+          });
+          clearTimeout(timer);
+          const ct = (r.headers.get('content-type') || '').toLowerCase();
+          if (!r.ok || !r.body || ct.includes('json') || ct.includes('html')) return false;
+          await pipeline(Readable.fromWeb(r.body as any), fs.createWriteStream(destPath));
+          return existsSync(destPath) && statSync(destPath).size > 5000;
+        } catch {
+          return false;
+        }
+      };
+
+      if (clipto) {
+        if (ext === 'mp3' && (clipto.audioUrl || clipto.muxedMp4Url)) {
+          const srcAudio = clipto.audioUrl || clipto.muxedMp4Url!;
+          const ts = Date.now();
+          const inTmp = `/tmp/yt_aud_in_${ts}.m4a`;
+          const outMp3 = `/tmp/yt_aud_${ts}.mp3`;
+          const { exec } = await import('child_process');
+          const fetchedIn = await downloadToTmp(srcAudio, inTmp);
+          const ffmpegInput = fetchedIn ? inTmp : srcAudio;
+          const mp3Ok = await new Promise<boolean>((resolve) => {
+            exec(
+              `ffmpeg -y -i "${ffmpegInput}" -vn -c:a libmp3lame -b:a 192k "${outMp3}"`,
+              { timeout: 30000 },
+              (err) => resolve(!err && existsSync(outMp3) && statSync(outMp3).size > 5000)
+            );
+          });
+          try { if (existsSync(inTmp)) fs.unlinkSync(inTmp); } catch {}
+          if (mp3Ok) {
+            res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
+            res.setHeader('Content-Type', 'audio/mpeg');
+            res.setHeader('Content-Length', statSync(outMp3).size);
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            return res.download(outMp3, cleanFilename, () => {
+              try { if (existsSync(outMp3)) fs.unlinkSync(outMp3); } catch {}
+            });
+          }
+          try { if (existsSync(outMp3)) fs.unlinkSync(outMp3); } catch {}
+
+          const audioResp = await fetch(srcAudio);
+          const ct = (audioResp.headers.get('content-type') || '').toLowerCase();
+          if (audioResp.ok && audioResp.body && !ct.includes('json') && !ct.includes('html')) {
+            res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
+            res.setHeader('Content-Type', mimeType);
+            res.setHeader('Content-Transfer-Encoding', 'binary');
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            const cl = audioResp.headers.get('content-length');
+            if (cl) res.setHeader('Content-Length', cl);
+            await pipeline(Readable.fromWeb(audioResp.body as any), res);
+            return;
+          }
+        }
+        if (ext === 'mp4') {
+          if (format === '1080' && clipto.hdVideoUrl && clipto.audioUrl) {
+            const ts = Date.now();
+            const vTmp = `/tmp/yt_v_${ts}.mp4`;
+            const aTmp = `/tmp/yt_a_${ts}.m4a`;
+            const outMux = `/tmp/yt_mux_${ts}.mp4`;
+            const [vOk, aOk] = await Promise.all([
+              downloadToTmp(clipto.hdVideoUrl, vTmp),
+              downloadToTmp(clipto.audioUrl, aTmp),
+            ]);
+            let muxOk = false;
+            if (vOk && aOk) {
+              const { exec } = await import('child_process');
+              muxOk = await new Promise<boolean>((resolve) => {
+                exec(
+                  `ffmpeg -y -i "${vTmp}" -i "${aTmp}" -c copy -movflags +faststart "${outMux}"`,
+                  { timeout: 30000 },
+                  (err) => resolve(!err && existsSync(outMux) && statSync(outMux).size > 10000)
+                );
+              });
+            }
+            try { if (existsSync(vTmp)) fs.unlinkSync(vTmp); } catch {}
+            try { if (existsSync(aTmp)) fs.unlinkSync(aTmp); } catch {}
+            if (muxOk) {
+              res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
+              res.setHeader('Content-Type', 'video/mp4');
+              res.setHeader('Content-Length', statSync(outMux).size);
+              res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+              res.setHeader('Access-Control-Allow-Origin', '*');
+              return res.download(outMux, cleanFilename, () => {
+                try { if (existsSync(outMux)) fs.unlinkSync(outMux); } catch {}
+              });
+            }
+            try { if (existsSync(outMux)) fs.unlinkSync(outMux); } catch {}
+          }
+          const directFallback = clipto.muxedMp4Url || clipto.hdVideoUrl;
+          if (directFallback) {
+            const directResp = await fetch(directFallback);
+            const ct = (directResp.headers.get('content-type') || '').toLowerCase();
+            if (directResp.ok && directResp.body && !ct.includes('json') && !ct.includes('html')) {
+              res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
+              res.setHeader('Content-Type', mimeType);
+              res.setHeader('Content-Transfer-Encoding', 'binary');
+              res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+              res.setHeader('Access-Control-Allow-Origin', '*');
+              const cl = directResp.headers.get('content-length');
+              if (cl) res.setHeader('Content-Length', cl);
+              await pipeline(Readable.fromWeb(directResp.body as any), res);
+              return;
+            }
+          }
+        }
+      }
+    } catch {
+      // Safe fallback
+    }
+
+    // 3. Fallback extractor via yt-dlp binary if available
     try {
       const d = await extractWithYtDlp(`https://www.youtube.com/watch?v=${ytId}`);
       if (d && Array.isArray(d.formats)) {
-        const streamFmt = d.formats.find((f: any) => f.ext === 'mp4' && f.url && f.vcodec !== 'none' && f.acodec !== 'none') ||
-                          d.formats.find((f: any) => f.url && f.ext === 'mp4');
+        const streamFmt = ext === 'mp3'
+          ? (d.formats.find((f: any) => f.url && f.acodec !== 'none' && (!f.vcodec || f.vcodec === 'none') && f.ext === 'm4a') ||
+             d.formats.find((f: any) => f.url && f.acodec !== 'none' && (!f.vcodec || f.vcodec === 'none')) ||
+             d.formats.find((f: any) => f.ext === 'mp4' && f.url && f.vcodec !== 'none' && f.acodec !== 'none'))
+          : (d.formats.find((f: any) => f.ext === 'mp4' && f.url && f.vcodec !== 'none' && f.acodec !== 'none') ||
+             d.formats.find((f: any) => f.url && f.vcodec !== 'none' && f.acodec !== 'none') ||
+             d.formats.find((f: any) => f.url && f.ext === 'mp4'));
         if (streamFmt && streamFmt.url) {
-          const directResp = await fetch(streamFmt.url, {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            },
-          });
+          const fmtHeaders: Record<string, string> = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            ...(streamFmt.http_headers || {}),
+          };
+          const directResp = await fetch(streamFmt.url, { headers: fmtHeaders });
           const ct = directResp.headers.get('content-type') || '';
           if (directResp.ok && directResp.body && !ct.includes('json') && !ct.includes('html')) {
             res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
@@ -935,9 +1313,39 @@ app.get('/api/download-youtube', async (req: Request, res: Response) => {
       // Safe fallback
     }
 
+    // 4. Fallback extractor via rahad-all-downloader-v2 / ytdl-core
+    try {
+      const { alldl } = await import('rahad-all-downloader-v2');
+      const rData: any = await Promise.race([
+        alldl(`https://www.youtube.com/watch?v=${ytId}`),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000)),
+      ]);
+      const rUrl = ext === 'mp3'
+        ? (rData?.data?.audio || rData?.data?.video || rData?.audio || rData?.video)
+        : (rData?.data?.video || rData?.data?.hd || rData?.video);
+      if (rUrl && typeof rUrl === 'string' && rUrl.startsWith('http')) {
+        const directResp = await fetch(rUrl);
+        const ct = directResp.headers.get('content-type') || '';
+        if (directResp.ok && directResp.body && !ct.includes('json') && !ct.includes('html')) {
+          res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
+          res.setHeader('Content-Type', mimeType);
+          res.setHeader('Content-Transfer-Encoding', 'binary');
+          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          const cl = directResp.headers.get('content-length');
+          if (cl) res.setHeader('Content-Length', cl);
+
+          await pipeline(Readable.fromWeb(directResp.body as any), res);
+          return;
+        }
+      }
+    } catch {
+      // Safe fallback
+    }
+
     // If stream could not be extracted, send honest status without dummy video
     if (!res.headersSent) {
-      return res.status(422).send('Error: YouTube stream could not be extracted at this moment. Please retry in a moment.');
+      return res.status(422).send('Error: Could not extract this video stream right now. Please try again in a moment.');
     }
 
   } catch (err: any) {
@@ -1040,7 +1448,8 @@ app.get('/api/download-clean', async (req: Request, res: Response) => {
 // 3.4 Direct Video & Audio Trimming Download Endpoint (Precise slice trimming with FFmpeg)
 app.get('/api/download-trim', async (req: Request, res: Response) => {
   const rawTargetUrl = (req.query.url as string || '').trim();
-  const ytIdParam = (req.query.ytId as string || '').trim();
+  const origUrlParam = (req.query.origUrl as string || '').trim();
+  const ytIdParam = ((req.query.ytId as string) || extractYouTubeId(rawTargetUrl) || extractYouTubeId(origUrlParam) || '').trim();
   const startTime = Math.max(0, parseFloat((req.query.start as string) || '0'));
   const endTime = Math.max(startTime + 0.5, parseFloat((req.query.end as string) || '0'));
   const format = ((req.query.format as string) || 'mp4').toLowerCase();
@@ -1049,7 +1458,7 @@ app.get('/api/download-trim', async (req: Request, res: Response) => {
   const rawFilename = (req.query.filename as string) || `Trimmed_Clip_${Math.round(startTime)}s_${Math.round(endTime)}s.${ext}`;
   const cleanFilename = rawFilename.replace(/[^a-zA-Z0-9._-]/g, '_');
 
-  if (!rawTargetUrl && !ytIdParam) {
+  if (!rawTargetUrl && !ytIdParam && !origUrlParam) {
     return res.status(400).send('Missing video URL or ID for trimming');
   }
 
@@ -1069,46 +1478,10 @@ app.get('/api/download-trim', async (req: Request, res: Response) => {
   try {
     let directStreamUrl = '';
     const isImageSource = (url: string) => /\.(jpg|jpeg|png|webp)(\?|$)/i.test(url) || url.includes('/vi/') || url.includes('ytimg.com');
+    const sourcePageUrl = origUrlParam || rawTargetUrl;
 
-    // Instagram Reels resolution
-    if (rawTargetUrl.includes('instagram.com')) {
-      try {
-        const { snapsave } = await import('snapsave-media-downloader');
-        const snapRes = await snapsave(rawTargetUrl);
-        const mp4Item = snapRes?.data?.find((x: any) => x.url && x.url.includes('.mp4')) || snapRes?.data?.[0];
-        if (mp4Item?.url) directStreamUrl = mp4Item.url;
-      } catch {}
-      if (!directStreamUrl) {
-        try {
-          const { igdl } = await import('btch-downloader');
-          const igData = await igdl(rawTargetUrl);
-          if (Array.isArray(igData) && igData[0]?.url) directStreamUrl = igData[0].url;
-        } catch {}
-      }
-    }
-
-    // TikTok resolution
-    if (!directStreamUrl && isTikTokUrl(rawTargetUrl)) {
-      try {
-        const tikRes = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(rawTargetUrl)}`);
-        const tikJson = await tikRes.json();
-        if (tikJson?.data?.play) {
-          directStreamUrl = tikJson.data.play.startsWith('http') ? tikJson.data.play : `https://www.tikwm.com${tikJson.data.play}`;
-        }
-      } catch {}
-    }
-
-    // Facebook resolution
-    if (!directStreamUrl && isFacebookUrl(rawTargetUrl)) {
-      try {
-        const { fbdown } = await import('ruhend-scraper');
-        const fb = await fbdown(rawTargetUrl);
-        if (fb?.HD || fb?.Normal_video) directStreamUrl = fb.HD || fb.Normal_video;
-      } catch {}
-    }
-
-    // Direct media link or local file fallback (never accept image thumbnail as video)
-    if (!directStreamUrl && rawTargetUrl && !isImageSource(rawTargetUrl)) {
+    // Direct media link or local file first (when already resolved cleanly)
+    if (rawTargetUrl && !isImageSource(rawTargetUrl) && !rawTargetUrl.includes('youtube.com/watch') && !rawTargetUrl.includes('youtube.com/shorts') && !rawTargetUrl.includes('youtu.be')) {
       if (rawTargetUrl.startsWith('http')) {
         directStreamUrl = rawTargetUrl;
       } else {
@@ -1126,54 +1499,115 @@ app.get('/api/download-trim', async (req: Request, res: Response) => {
     let effectiveInput = tempInput;
     let inputReady = false;
 
-    if (directStreamUrl && existsSync(directStreamUrl)) {
-      effectiveInput = directStreamUrl;
-      inputReady = true;
-    } else if (directStreamUrl && directStreamUrl.startsWith('http')) {
-      try {
-        const fetchHeaders: Record<string, string> = {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        };
-        if (directStreamUrl.includes('instagram')) fetchHeaders['Referer'] = 'https://www.instagram.com/';
-        if (directStreamUrl.includes('tiktok') || directStreamUrl.includes('tikwm')) fetchHeaders['Referer'] = 'https://www.tiktok.com/';
+    const downloadToTempInput = async (streamUrl: string, extraHeaders: Record<string, string> = {}): Promise<boolean> => {
+      const attemptFetch = async (target: string): Promise<boolean> => {
+        try {
+          if (!target || !target.startsWith('http')) return false;
+          const fetchHeaders: Record<string, string> = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            ...extraHeaders,
+          };
+          if (target.includes('instagram')) fetchHeaders['Referer'] = 'https://www.instagram.com/';
+          if (target.includes('tiktok') || target.includes('tikwm')) fetchHeaders['Referer'] = 'https://www.tiktok.com/';
 
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000);
-        const dlResp = await fetch(directStreamUrl, { headers: fetchHeaders, redirect: 'follow', signal: controller.signal });
-        clearTimeout(timeout);
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 25000);
+          const dlResp = await fetch(target, { headers: fetchHeaders, redirect: 'follow', signal: controller.signal });
+          clearTimeout(timeout);
 
-        const ct = dlResp.headers.get('content-type') || '';
-        if (dlResp.ok && dlResp.body && !ct.includes('image') && !ct.includes('text') && !ct.includes('json')) {
-          const fileStream = createWriteStream(tempInput);
-          await pipeline(Readable.fromWeb(dlResp.body as any), fileStream);
-          if (existsSync(tempInput) && statSync(tempInput).size > 10000) {
-            inputReady = true;
-          }
-        }
-      } catch (dlErr) {
-        console.warn('Direct stream download error:', dlErr);
-      }
-    }
-
-    // Extract YouTube stream if ytIdParam is provided
-    if (!inputReady && ytIdParam) {
-      try {
-        const { youtube } = await import('btch-downloader');
-        const ytData: any = await youtube(`https://www.youtube.com/watch?v=${ytIdParam}`);
-        const ytStream = (ext === 'mp3' && ytData?.mp3) ? ytData.mp3 : (ytData?.mp4 || ytData?.mp3);
-        if (ytStream) {
-          const dlResp = await fetch(ytStream);
-          if (dlResp.ok && dlResp.body) {
+          const ct = (dlResp.headers.get('content-type') || '').toLowerCase();
+          if (dlResp.ok && dlResp.body && !ct.includes('image') && !ct.includes('text') && !ct.includes('json') && !ct.includes('html')) {
             const fileStream = createWriteStream(tempInput);
             await pipeline(Readable.fromWeb(dlResp.body as any), fileStream);
             if (existsSync(tempInput) && statSync(tempInput).size > 10000) {
               effectiveInput = tempInput;
-              inputReady = true;
+              return true;
             }
           }
+        } catch (dlErr) {
+          console.warn('Direct stream download error:', dlErr);
         }
-      } catch (btchErr) {
-        console.warn('btch YouTube trim stream error:', btchErr);
+        return false;
+      };
+
+      if (await attemptFetch(streamUrl)) return true;
+      if (streamUrl.includes('googlevideo.com') && !streamUrl.includes('api.vidsnap.app/proxy')) {
+        return await attemptFetch(`https://api.vidsnap.app/proxy?u=${encodeURIComponent(streamUrl)}`);
+      }
+      return false;
+    };
+
+    if (directStreamUrl && existsSync(directStreamUrl)) {
+      effectiveInput = directStreamUrl;
+      inputReady = true;
+    } else if (directStreamUrl && directStreamUrl.startsWith('http')) {
+      inputReady = await downloadToTempInput(directStreamUrl);
+    }
+
+    // Re-resolve Instagram / TikTok / Facebook from original URL if direct URL was missing or expired
+    if (!inputReady && sourcePageUrl) {
+      if (sourcePageUrl.includes('instagram.com')) {
+        try {
+          const { snapsave } = await import('snapsave-media-downloader');
+          const snapRes: any = await snapsave(sourcePageUrl);
+          const igUrl = snapRes?.data?.media?.[0]?.url || (Array.isArray(snapRes?.data) ? (snapRes.data.find((x: any) => x.url && x.url.includes('.mp4'))?.url || snapRes.data[0]?.url) : '');
+          if (igUrl) inputReady = await downloadToTempInput(igUrl);
+        } catch {}
+        if (!inputReady) {
+          try {
+            const { igdl } = await import('btch-downloader');
+            const igData: any = await igdl(sourcePageUrl);
+            const igUrl = Array.isArray(igData) ? igData[0]?.url : igData?.result?.[0]?.url;
+            if (igUrl) inputReady = await downloadToTempInput(igUrl);
+          } catch {}
+        }
+      } else if (isTikTokUrl(sourcePageUrl)) {
+        try {
+          const tikRes = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(sourcePageUrl)}`);
+          const tikJson: any = await tikRes.json();
+          if (tikJson?.data?.play) {
+            const ttUrl = tikJson.data.play.startsWith('http') ? tikJson.data.play : `https://www.tikwm.com${tikJson.data.play}`;
+            inputReady = await downloadToTempInput(ttUrl);
+          }
+        } catch {}
+      } else if (isFacebookUrl(sourcePageUrl)) {
+        try {
+          const { fbdl } = await import('ruhend-scraper');
+          const fbUrls = await fbdl(sourcePageUrl);
+          if (Array.isArray(fbUrls) && fbUrls[0]) {
+            inputReady = await downloadToTempInput(fbUrls[0]);
+          }
+        } catch {}
+      }
+    }
+
+    // Extract YouTube stream if ytIdParam is provided (or resolved from URL)
+    if (!inputReady && ytIdParam) {
+      try {
+        const clipto = await extractYouTubeWithClipto(ytIdParam);
+        if (clipto) {
+          const ytCliptoUrl = (ext === 'mp3' && clipto.audioUrl)
+            ? clipto.audioUrl
+            : (clipto.muxedMp4Url || clipto.hdVideoUrl || clipto.audioUrl);
+          if (ytCliptoUrl) {
+            inputReady = await downloadToTempInput(ytCliptoUrl);
+          }
+        }
+      } catch (cliptoTrimErr) {
+        console.warn('Clipto YouTube trim stream error:', cliptoTrimErr);
+      }
+
+      if (!inputReady) {
+        try {
+          const { youtube } = await import('btch-downloader');
+          const ytData: any = await youtube(`https://www.youtube.com/watch?v=${ytIdParam}`);
+          const ytStream = (ext === 'mp3' && ytData?.mp3) ? ytData.mp3 : (ytData?.mp4 || ytData?.mp3);
+          if (ytStream) {
+            inputReady = await downloadToTempInput(ytStream);
+          }
+        } catch (btchErr) {
+          console.warn('btch YouTube trim stream error:', btchErr);
+        }
       }
 
       if (!inputReady) {
@@ -1181,19 +1615,10 @@ app.get('/api/download-trim', async (req: Request, res: Response) => {
           const d = await extractWithYtDlp(`https://www.youtube.com/watch?v=${ytIdParam}`);
           if (d && Array.isArray(d.formats)) {
             const streamFmt = d.formats.find((f: any) => f.ext === 'mp4' && f.url && f.vcodec !== 'none' && f.acodec !== 'none') ||
+                              d.formats.find((f: any) => f.url && f.vcodec !== 'none' && f.acodec !== 'none') ||
                               d.formats.find((f: any) => f.url && f.ext === 'mp4');
             if (streamFmt?.url) {
-              directStreamUrl = streamFmt.url;
-              // Fetch remote stream into tempInput
-              const dlResp = await fetch(directStreamUrl);
-              if (dlResp.ok && dlResp.body) {
-                const fileStream = createWriteStream(tempInput);
-                await pipeline(Readable.fromWeb(dlResp.body as any), fileStream);
-                if (existsSync(tempInput) && statSync(tempInput).size > 10000) {
-                  effectiveInput = tempInput;
-                  inputReady = true;
-                }
-              }
+              inputReady = await downloadToTempInput(streamFmt.url, streamFmt.http_headers || {});
             }
           }
         } catch (ytErr) {
@@ -1205,14 +1630,14 @@ app.get('/api/download-trim', async (req: Request, res: Response) => {
     // Do NOT send dummy ocean video fallback! Return honest status if media could not be resolved
     if (!inputReady) {
       cleanup();
-      return res.status(422).send('Error: Could not fetch original video stream for trimming. Dummy video fallback has been disabled.');
+      return res.status(422).send('Error: Could not fetch original video stream for trimming. Please retry in a moment.');
     }
 
-    // Fast FFmpeg slicing (< 1-2 seconds)
+    // Fast FFmpeg slicing
     const sliceDuration = Math.max(0.5, endTime - startTime);
     const runExec = (cmd: string): Promise<boolean> => {
       return new Promise((resolve) => {
-        exec(cmd, { timeout: 25000 }, (err) => {
+        exec(cmd, { timeout: 90000 }, (err) => {
           if (!err && existsSync(tempOutput) && statSync(tempOutput).size > 1000) {
             resolve(true);
           } else {
