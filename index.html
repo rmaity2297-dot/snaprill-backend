@@ -530,7 +530,7 @@
               <span>Precision Video & Audio Trimmer</span>
             </h3>
             <span id="trimDurationBadge" class="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">
-              0s - 15s (15s selected)
+              0s - 0s (0s selected)
             </span>
           </div>
 
@@ -545,29 +545,29 @@
                 id="trimStartSlider"
                 type="range"
                 min="0"
-                max="60"
+                max="600"
                 value="0"
                 step="0.5"
                 class="w-full h-2 bg-slate-800 rounded-lg cursor-pointer"
-                oninput="onTrimSliderChange()"
+                oninput="onTrimSliderChange('start')"
               />
             </div>
 
             <!-- End Time Slider -->
             <div>
               <div class="flex justify-between text-xs text-slate-400 mb-1">
-                <span>End Time: <strong id="endTimeDisplay" class="text-white font-mono">15s</strong></span>
-                <span class="text-[11px] text-slate-500">Drag to set end point</span>
+                <span>End Time: <strong id="endTimeDisplay" class="text-white font-mono">0s</strong></span>
+                <span class="text-[11px] text-slate-500">Max: <strong id="trimTotalDurationDisplay" class="text-slate-300 font-mono">--</strong> • Drag to set end point</span>
               </div>
               <input
                 id="trimEndSlider"
                 type="range"
                 min="0"
-                max="60"
-                value="15"
+                max="600"
+                value="0"
                 step="0.5"
                 class="w-full h-2 bg-slate-800 rounded-lg cursor-pointer"
-                oninput="onTrimSliderChange()"
+                oninput="onTrimSliderChange('end')"
               />
             </div>
 
@@ -1111,6 +1111,14 @@
       const durBadge = document.getElementById('previewDurationBadge');
       const startSlider = document.getElementById('trimStartSlider');
       const endSlider = document.getElementById('trimEndSlider');
+      const trimTotalEl = document.getElementById('trimTotalDurationDisplay');
+
+      // Always reset trimmer selection to 0s - 0s when loading a new video
+      window._trimUserTouched = false;
+      if (startSlider && endSlider) {
+        startSlider.value = 0;
+        endSlider.value = 0;
+      }
 
       // Helper for accurate duration formatting (MM:SS or HH:MM:SS)
       window.formatVideoDuration = function(totalSeconds) {
@@ -1127,14 +1135,22 @@
 
       window.updateDurationUI = function(sec) {
         if (!sec || isNaN(sec) || sec <= 0) return;
-        const rounded = Math.round(sec);
-        if (durBadge) durBadge.textContent = window.formatVideoDuration(rounded);
+        const exactMax = Math.max(1, Math.round(sec * 2) / 2);
+        const formatted = window.formatVideoDuration(sec);
+        if (durBadge) durBadge.textContent = formatted;
+        if (trimTotalEl) trimTotalEl.textContent = `${formatted} (${exactMax}s)`;
         if (startSlider && endSlider) {
-          startSlider.max = rounded;
-          endSlider.max = rounded;
-          startSlider.value = 0;
-          endSlider.value = rounded;
-          onTrimSliderChange();
+          startSlider.max = exactMax;
+          endSlider.max = exactMax;
+          if (!window._trimUserTouched) {
+            startSlider.value = 0;
+            endSlider.value = 0;
+            onTrimSliderChange('reset');
+          } else {
+            if (parseFloat(endSlider.value) > exactMax) endSlider.value = exactMax;
+            if (parseFloat(startSlider.value) > exactMax) startSlider.value = Math.max(0, exactMax - 0.5);
+            onTrimSliderChange('sync');
+          }
         }
       };
 
@@ -1144,24 +1160,23 @@
       if (streamUrl) {
         const m = streamUrl.match(/[?&]dur=([0-9.]+)/i);
         if (m && parseFloat(m[1])) {
-          initialDur = Math.round(parseFloat(m[1]));
+          initialDur = parseFloat(m[1]);
         }
       }
-      if (!initialDur && item.duration && typeof item.duration === 'number' && item.duration > 0 && item.duration !== 30) {
-        initialDur = Math.round(item.duration);
-      } else if (!initialDur && item.duration && item.duration === 30 && item.platform !== 'youtube') {
-        initialDur = 30;
+      if (!initialDur && item.duration && typeof item.duration === 'number' && item.duration > 0) {
+        initialDur = item.duration;
       }
 
       if (initialDur > 0) {
         window.updateDurationUI(initialDur);
       } else {
-        durBadge.textContent = '00:15';
-        startSlider.max = 30;
-        endSlider.max = 30;
+        if (durBadge) durBadge.textContent = '00:00';
+        if (trimTotalEl) trimTotalEl.textContent = 'Auto';
+        startSlider.max = 600;
+        endSlider.max = 600;
         startSlider.value = 0;
-        endSlider.value = 15;
-        onTrimSliderChange();
+        endSlider.value = 0;
+        onTrimSliderChange('reset');
       }
 
       // 2. Real-time HTML5 video metadata listener for exact file duration
@@ -1310,15 +1325,25 @@
     // Trimmed Download
     function triggerTrimmedDownload(format = 'mp4') {
       if (!currentVideoData) return;
-      const startTime = parseFloat(document.getElementById('trimStartSlider').value);
-      const endTime = parseFloat(document.getElementById('trimEndSlider').value);
+      hideError();
+      const startTime = parseFloat(document.getElementById('trimStartSlider').value) || 0;
+      const endTime = parseFloat(document.getElementById('trimEndSlider').value) || 0;
+      if (endTime <= 0 || endTime <= startTime) {
+        showError(
+          currentLang === 'bn'
+            ? 'দয়া করে ট্রিমার স্লাইডার দিয়ে Start ও End Time সিলেক্ট করে তারপর ডাউনলোড বাটনে ক্লিক করুন।'
+            : 'Please select a valid End Time (greater than Start Time) on the trimmer slider before downloading.'
+        );
+        return;
+      }
       const baseFilename = document.getElementById('customFilenameInput').value.trim() || 'SnapRill_Trimmed';
       const cleanFilename = `${baseFilename}_${Math.round(startTime)}s_${Math.round(endTime)}s.${format}`;
 
       const streamUrl = currentVideoData.videoUrl || currentVideoData.audioUrl || '';
+      const origUrl = currentVideoData.originalUrl || '';
       const ytId = (currentVideoData.platform === 'youtube' && currentVideoData.id) ? currentVideoData.id : '';
 
-      const dlUrl = `${API_BASE}/api/download-trim?url=${encodeURIComponent(streamUrl)}&ytId=${encodeURIComponent(ytId)}&start=${startTime}&end=${endTime}&format=${format}&filename=${encodeURIComponent(cleanFilename)}`;
+      const dlUrl = `${API_BASE}/api/download-trim?url=${encodeURIComponent(streamUrl)}&origUrl=${encodeURIComponent(origUrl)}&ytId=${encodeURIComponent(ytId)}&start=${startTime}&end=${endTime}&format=${format}&filename=${encodeURIComponent(cleanFilename)}`;
       executeDownload(dlUrl, cleanFilename, streamUrl);
     }
 
@@ -1352,8 +1377,8 @@
       try {
         let resp = await fetch(endpointUrl);
         
-        // If primary download endpoint returned error, attempt fallback to clean download
-        if (!resp.ok && fallbackUrl && typeof fallbackUrl === 'string' && fallbackUrl.startsWith('http') && !endpointUrl.includes('download-clean')) {
+        // If primary download endpoint returned error, attempt fallback to clean download (except for trimmed downloads)
+        if (!resp.ok && fallbackUrl && typeof fallbackUrl === 'string' && fallbackUrl.startsWith('http') && !endpointUrl.includes('download-clean') && !endpointUrl.includes('download-trim')) {
           try {
             const cleanDl = `${API_BASE}/api/download-clean?url=${encodeURIComponent(fallbackUrl)}&filename=${encodeURIComponent(filename)}`;
             const cleanResp = await fetch(cleanDl);
@@ -1366,12 +1391,15 @@
         if (!resp.ok) {
           toast.classList.add('hidden');
           const errText = (await resp.text().catch(() => '')) || '';
-          const isCopyrightOrBlocked = errText.includes('YouTube stream') || errText.includes('Could not fetch original') || errText.includes('restricted') || errText.includes('blocked');
-          const friendlyMsg = isCopyrightOrBlocked
+          const lowerErr = errText.toLowerCase();
+          const isExplicitRestriction = lowerErr.includes('copyright') || lowerErr.includes('private video') || lowerErr.includes('age-restricted') || lowerErr.includes('geo-blocked');
+          const friendlyMsg = isExplicitRestriction
             ? (currentLang === 'bn'
-                ? '⚠️ এই নির্দিষ্ট ভিডিওটি কপিরাইট যুক্ত বা ইউটিউব প্ল্যাটফর্মে সুরক্ষিত রয়েছে। অনুগ্রহ করে অন্য কোনো রিলস বা শর্টস চেষ্টা করুন।'
-                : '⚠️ This specific video has copyright protection or restrictions on YouTube. Please try another video or reel.')
-            : (errText || 'Download could not complete. Please retry.');
+                ? '⚠️ এই ভিডিওটি প্রাইভেট বা কপিরাইট দ্বারা সীমাবদ্ধ রয়েছে। অনুগ্রহ করে অন্য একটি পাবলিক ভিডিও লিংক চেষ্টা করুন।'
+                : '⚠️ This video is private or age/copyright restricted by the source platform.')
+            : (errText || (currentLang === 'bn'
+                ? '⚠️ এই মুহূর্তে ভিডিওটি ডাউনলোড করা যাচ্ছে না। অনুগ্রহ করে কিছুক্ষণ পর আবার চেষ্টা করুন।'
+                : '⚠️ Could not extract this video stream right now. Please try again in a moment.'));
           showError(friendlyMsg);
           return;
         }
@@ -1415,22 +1443,41 @@
       }
     }
 
+    function formatTrimLabel(sec) {
+      if (!sec || isNaN(sec) || sec <= 0) return '0s';
+      if (sec >= 60) {
+        const m = Math.floor(sec / 60);
+        const s = Math.round((sec % 60) * 10) / 10;
+        return `${m}m ${s}s`;
+      }
+      return `${sec}s`;
+    }
+
     // Slider range update
-    function onTrimSliderChange() {
+    function onTrimSliderChange(source) {
+      if (source === 'start' || source === 'end') {
+        window._trimUserTouched = true;
+      }
       const startSlider = document.getElementById('trimStartSlider');
       const endSlider = document.getElementById('trimEndSlider');
-      let startVal = parseFloat(startSlider.value);
-      let endVal = parseFloat(endSlider.value);
+      let startVal = parseFloat(startSlider.value) || 0;
+      let endVal = parseFloat(endSlider.value) || 0;
 
-      if (startVal >= endVal) {
+      if (source === 'start' && startVal > endVal) {
+        endVal = startVal;
+        endSlider.value = endVal;
+      } else if (source === 'end' && endVal < startVal) {
         startVal = Math.max(0, endVal - 0.5);
+        startSlider.value = startVal;
+      } else if (startVal > endVal) {
+        startVal = endVal;
         startSlider.value = startVal;
       }
 
-      document.getElementById('startTimeDisplay').textContent = `${startVal}s`;
-      document.getElementById('endTimeDisplay').textContent = `${endVal}s`;
-      const diff = (endVal - startVal).toFixed(1);
-      document.getElementById('trimDurationBadge').textContent = `${startVal}s - ${endVal}s (${diff}s selected)`;
+      document.getElementById('startTimeDisplay').textContent = formatTrimLabel(startVal);
+      document.getElementById('endTimeDisplay').textContent = formatTrimLabel(endVal);
+      const diff = Math.max(0, Math.round((endVal - startVal) * 10) / 10);
+      document.getElementById('trimDurationBadge').textContent = `${formatTrimLabel(startVal)} - ${formatTrimLabel(endVal)} (${diff}s selected)`;
     }
 
     // Gemini AI Platform Generator (Only generates when user explicitly clicks Generate button)
