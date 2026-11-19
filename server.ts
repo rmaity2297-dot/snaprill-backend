@@ -387,6 +387,136 @@ async function saveCachedMediaFile(cacheKey: string, srcPath: string) {
   } catch {}
 }
 
+// Background pre-cache registry so downloads click -> finish within a few seconds
+const inFlightCacheJobs = new Map<string, Promise<string | null>>();
+
+async function waitForCachedOrInFlight(cacheKey: string): Promise<string | null> {
+  const ready = getCachedMediaPath(cacheKey);
+  if (ready) return ready;
+  const activeJob = inFlightCacheJobs.get(cacheKey);
+  if (activeJob) {
+    try {
+      await Promise.race([
+        activeJob,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 60000)),
+      ]);
+    } catch {}
+    return getCachedMediaPath(cacheKey);
+  }
+  return null;
+}
+
+async function fetchFileForCache(url: string, destPath: string): Promise<boolean> {
+  try {
+    const { Readable } = await import('stream');
+    const { pipeline } = await import('stream/promises');
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 65000);
+    const r = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+        ...(url.includes('instagram') ? { Referer: 'https://www.instagram.com/' } : {}),
+        ...(url.includes('tiktok') || url.includes('tikwm') ? { Referer: 'https://www.tiktok.com/' } : {}),
+      },
+      redirect: 'follow',
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    const ct = (r.headers.get('content-type') || '').toLowerCase();
+    if (!r.ok || !r.body || ct.includes('json') || ct.includes('html') || ct.includes('image')) return false;
+    await pipeline(Readable.fromWeb(r.body as any), fs.createWriteStream(destPath));
+    return existsSync(destPath) && statSync(destPath).size > 10000;
+  } catch {
+    return false;
+  }
+}
+
+function triggerBackgroundYouTubePrecache(
+  ytId: string,
+  cliptoHint?: { muxedMp4Url?: string; hdVideoUrl?: string; audioUrl?: string } | null
+) {
+  const cacheKey = getMediaCacheKey(ytId);
+  if (!cacheKey || getCachedMediaPath(cacheKey) || inFlightCacheJobs.has(cacheKey)) return;
+
+  const job = (async (): Promise<string | null> => {
+    const ts = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const vTmp = `/tmp/pre_v_${ts}.mp4`;
+    const aTmp = `/tmp/pre_a_${ts}.m4a`;
+    const outMux = `/tmp/pre_mux_${ts}.mp4`;
+    const cleanup = () => {
+      try { if (existsSync(vTmp)) fs.unlinkSync(vTmp); } catch {}
+      try { if (existsSync(aTmp)) fs.unlinkSync(aTmp); } catch {}
+      try { if (existsSync(outMux)) fs.unlinkSync(outMux); } catch {}
+    };
+
+    try {
+      const info = (cliptoHint && cliptoHint.hdVideoUrl && cliptoHint.audioUrl)
+        ? cliptoHint
+        : await extractYouTubeWithClipto(ytId);
+      if (!info) return null;
+
+      if (info.hdVideoUrl && info.audioUrl) {
+        const [vOk, aOk] = await Promise.all([
+          fetchFileForCache(info.hdVideoUrl, vTmp),
+          fetchFileForCache(info.audioUrl, aTmp),
+        ]);
+        if (vOk && aOk) {
+          const { exec } = await import('child_process');
+          const muxOk = await new Promise<boolean>((resolve) => {
+            exec(
+              `ffmpeg -y -i "${vTmp}" -i "${aTmp}" -c copy -movflags +faststart "${outMux}"`,
+              { timeout: 30000 },
+              (err) => resolve(!err && existsSync(outMux) && statSync(outMux).size > 10000)
+            );
+          });
+          if (muxOk) {
+            await saveCachedMediaFile(cacheKey, outMux);
+            return getCachedMediaPath(cacheKey);
+          }
+        }
+      }
+
+      if (info.muxedMp4Url) {
+        if (await fetchFileForCache(info.muxedMp4Url, outMux)) {
+          await saveCachedMediaFile(cacheKey, outMux);
+          return getCachedMediaPath(cacheKey);
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    } finally {
+      cleanup();
+      inFlightCacheJobs.delete(cacheKey);
+    }
+  })();
+
+  inFlightCacheJobs.set(cacheKey, job);
+}
+
+function triggerBackgroundDirectPrecache(cacheKey: string, mediaUrl: string) {
+  if (!cacheKey || !mediaUrl || !mediaUrl.startsWith('http')) return;
+  if (getCachedMediaPath(cacheKey) || inFlightCacheJobs.has(cacheKey)) return;
+
+  const job = (async (): Promise<string | null> => {
+    const tmp = `/tmp/pre_dir_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.mp4`;
+    try {
+      if (await fetchFileForCache(mediaUrl, tmp)) {
+        await saveCachedMediaFile(cacheKey, tmp);
+        return getCachedMediaPath(cacheKey);
+      }
+      return null;
+    } catch {
+      return null;
+    } finally {
+      try { if (existsSync(tmp)) fs.unlinkSync(tmp); } catch {}
+      inFlightCacheJobs.delete(cacheKey);
+    }
+  })();
+
+  inFlightCacheJobs.set(cacheKey, job);
+}
+
 // Ensure yt-dlp has executable permissions
 if (existsSync('./bin/yt-dlp')) {
   try {
@@ -568,6 +698,7 @@ app.all(['/api/resolve', '/api/resolve-video'], async (req: Request, res: Respon
             ]
           };
 
+          triggerBackgroundDirectPrecache(getMediaCacheKey('', rawUrl), cleanPlayUrl);
           return res.json({ success: true, data: resolved });
         }
       } catch (err) {
@@ -617,10 +748,12 @@ app.all(['/api/resolve', '/api/resolve-video'], async (req: Request, res: Respon
         }
 
         // Fallback to Clipto / yt-dlp / YouTube search duration so stream & actual length (40s, 1m, 2m, 5m, 6m) are always accurate
+        let resolvedClipto: { muxedMp4Url?: string; hdVideoUrl?: string; audioUrl?: string } | null = null;
         if (!directMp4Url || !ytDuration) {
           try {
             const cliptoInfo = await extractYouTubeWithClipto(ytId);
             if (cliptoInfo) {
+              resolvedClipto = cliptoInfo;
               if (cliptoInfo.title) title = cliptoInfo.title;
               if (cliptoInfo.author) author = cliptoInfo.author;
               if (cliptoInfo.thumbnail) oembedThumbnail = cliptoInfo.thumbnail;
@@ -681,6 +814,7 @@ app.all(['/api/resolve', '/api/resolve-video'], async (req: Request, res: Respon
           ]
         };
 
+        triggerBackgroundYouTubePrecache(ytId, resolvedClipto);
         return res.json({ success: true, data: resolved });
       }
     }
@@ -796,6 +930,9 @@ app.all(['/api/resolve', '/api/resolve-video'], async (req: Request, res: Respon
         ]
       };
 
+      if (finalMp4Url) {
+        triggerBackgroundDirectPrecache(getMediaCacheKey('', rawUrl), finalMp4Url);
+      }
       return res.json({ success: true, data: resolved });
     }
 
@@ -903,6 +1040,9 @@ app.all(['/api/resolve', '/api/resolve-video'], async (req: Request, res: Respon
         ]
       };
 
+      if (finalFbMp4Url) {
+        triggerBackgroundDirectPrecache(getMediaCacheKey('', rawUrl), finalFbMp4Url);
+      }
       return res.json({ success: true, data: resolved });
     }
 
@@ -1101,7 +1241,7 @@ app.get('/api/extract-audio', async (req: Request, res: Response) => {
     let effectiveInput = tempInput;
     let isLocalOrCached = false;
     const cacheKey = getMediaCacheKey(ytIdParam, origUrlParam || targetUrl);
-    const cachedSrc = getCachedMediaPath(cacheKey);
+    const cachedSrc = await waitForCachedOrInFlight(cacheKey);
     if (cachedSrc) {
       effectiveInput = cachedSrc;
       isLocalOrCached = true;
@@ -1258,9 +1398,11 @@ app.get('/api/download-youtube', async (req: Request, res: Response) => {
     const { Readable } = await import('stream');
     const { pipeline } = await import('stream/promises');
 
-    // Fast path: reuse cached 1080p YouTube video if recently downloaded (makes sequential MP3 / 1080p instant!)
+    // Fast path: reuse cached or already pre-fetching 1080p YouTube video (makes HD / MP3 near-instant!)
     const ytCacheKey = getMediaCacheKey(ytId);
-    const cachedYtMp4 = getCachedMediaPath(ytCacheKey);
+    const cachedYtMp4 = (format === '720')
+      ? getCachedMediaPath(ytCacheKey)
+      : await waitForCachedOrInFlight(ytCacheKey);
     if (cachedYtMp4) {
       if (ext === 'mp3') {
         const ts = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -1684,10 +1826,10 @@ app.get('/api/download-trim', async (req: Request, res: Response) => {
       }
     }
 
-    // Prepare reliable video input for FFmpeg (check shared cache first for instant response!)
+    // Prepare reliable video input for FFmpeg (check shared cache or active background pre-cache!)
     let effectiveInput = tempInput;
     let inputReady = false;
-    const cachedVideo = getCachedMediaPath(cacheKey);
+    const cachedVideo = await waitForCachedOrInFlight(cacheKey);
     if (cachedVideo) {
       effectiveInput = cachedVideo;
       inputReady = true;
