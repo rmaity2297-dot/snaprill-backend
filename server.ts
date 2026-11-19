@@ -2045,12 +2045,24 @@ app.get('/api/download-trim', async (req: Request, res: Response) => {
           sliceOk = await runExec(`ffmpeg -y -threads 1 -ss ${startTime} -t ${sliceDuration} -i "${effectiveInput}" -vn -c:a aac "${tempOutput}"`);
         }
       } else {
-        sliceOk = await runExec(`ffmpeg -y -threads 1 -ss ${startTime} -t ${sliceDuration} -i "${effectiveInput}" -c:v libx264 -preset ultrafast -crf 24 -c:a aac -b:a 128k -movflags +faststart "${tempOutput}"`);
-        if (!sliceOk) {
-          sliceOk = await runExec(`ffmpeg -y -threads 1 -ss ${startTime} -t ${sliceDuration} -i "${effectiveInput}" -c:v libx264 -preset ultrafast -crf 24 -an -movflags +faststart "${tempOutput}"`);
+        // Ultra-fast stream copy first (~0.2s–0.5s, near-zero RAM) instead of slow full 1080p re-encoding
+        sliceOk = await runExec(`ffmpeg -y -ss ${startTime} -t ${sliceDuration} -i "${effectiveInput}" -c copy -avoid_negative_ts make_zero -movflags +faststart "${tempOutput}"`);
+        if (sliceOk) {
+          const validCopy = await new Promise<boolean>((resolve) => {
+            exec(`ffmpeg -hide_banner -i "${tempOutput}"`, { timeout: 5000 }, (_e, _out, stderr) => {
+              resolve((stderr || '').includes('Video:'));
+            });
+          });
+          if (!validCopy || statSync(tempOutput).size < 15000) {
+            try { if (existsSync(tempOutput)) unlinkSync(tempOutput); } catch {}
+            sliceOk = false;
+          }
         }
         if (!sliceOk) {
-          sliceOk = await runExec(`ffmpeg -y -ss ${startTime} -t ${sliceDuration} -i "${effectiveInput}" -c copy -movflags +faststart "${tempOutput}"`);
+          sliceOk = await runExec(`ffmpeg -y -threads 1 -ss ${startTime} -t ${sliceDuration} -i "${effectiveInput}" -c:v libx264 -preset ultrafast -crf 24 -c:a aac -b:a 128k -movflags +faststart "${tempOutput}"`);
+        }
+        if (!sliceOk) {
+          sliceOk = await runExec(`ffmpeg -y -threads 1 -ss ${startTime} -t ${sliceDuration} -i "${effectiveInput}" -c:v libx264 -preset ultrafast -crf 24 -an -movflags +faststart "${tempOutput}"`);
         }
       }
 
