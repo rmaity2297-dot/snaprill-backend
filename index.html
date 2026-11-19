@@ -395,6 +395,7 @@
         <div id="downloadToast" class="hidden p-4 rounded-xl bg-emerald-950/90 border border-emerald-500/40 text-emerald-200 text-xs sm:text-sm flex items-center gap-3 shadow-2xl shadow-emerald-900/50 backdrop-blur-md transition-all">
           <span class="text-emerald-400 text-lg flex-shrink-0 animate-bounce">📥</span>
           <span id="downloadToastText" class="flex-1 font-semibold leading-snug"></span>
+          <a id="downloadToastSaveBtn" href="#" download="" rel="noopener" class="hidden px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex-shrink-0 transition">💾 Save</a>
           <button onclick="document.getElementById('downloadToast').classList.add('hidden')" class="text-emerald-400 hover:text-white p-1">✕</button>
         </div>
 
@@ -1311,14 +1312,17 @@
       const baseFilename = document.getElementById('customFilenameInput').value.trim() || 'SnapRill_Audio';
       const cleanFilename = `${baseFilename}_extracted.mp3`;
 
-      let streamUrl = currentVideoData.audioUrl || currentVideoData.videoUrl;
+      let streamUrl = currentVideoData.audioUrl || currentVideoData.videoUrl || '';
+      const origUrl = currentVideoData.originalUrl || '';
+      const ytId = (currentVideoData.platform === 'youtube' && currentVideoData.id) ? currentVideoData.id : '';
+
       if (currentVideoData.platform === 'youtube' && currentVideoData.id) {
-        const dlUrl = `${API_BASE}/api/download-youtube?id=${encodeURIComponent(currentVideoData.id)}&format=mp3&filename=${encodeURIComponent(cleanFilename)}&url=${encodeURIComponent(streamUrl || '')}`;
+        const dlUrl = `${API_BASE}/api/download-youtube?id=${encodeURIComponent(currentVideoData.id)}&format=mp3&filename=${encodeURIComponent(cleanFilename)}&url=${encodeURIComponent(streamUrl)}`;
         executeDownload(dlUrl, cleanFilename, streamUrl);
         return;
       }
 
-      const dlUrl = `${API_BASE}/api/extract-audio?url=${encodeURIComponent(streamUrl || '')}&filename=${encodeURIComponent(cleanFilename)}`;
+      const dlUrl = `${API_BASE}/api/extract-audio?url=${encodeURIComponent(streamUrl)}&origUrl=${encodeURIComponent(origUrl)}&ytId=${encodeURIComponent(ytId)}&filename=${encodeURIComponent(cleanFilename)}`;
       executeDownload(dlUrl, cleanFilename, streamUrl);
     }
 
@@ -1349,13 +1353,19 @@
 
     let downloadToastTimeout = null;
 
-    // Core File Download Trigger (Eliminates "Resume / Site wasn't available" error by verifying stream and serving via Blob)
+    // Core File Download Trigger (Android & PC sequential download compatible)
     async function executeDownload(endpointUrl, filename, fallbackUrl) {
       const toast = document.getElementById('downloadToast');
       const toastText = document.getElementById('downloadToastText');
+      const saveBtn = document.getElementById('downloadToastSaveBtn');
 
       // 1. INSTANT NOTIFICATION FEEDBACK AT 0 MILLISECOND:
       clearTimeout(downloadToastTimeout);
+      if (saveBtn) {
+        saveBtn.classList.add('hidden');
+        saveBtn.setAttribute('href', '#');
+        saveBtn.setAttribute('download', '');
+      }
       toastText.textContent = i18n[currentLang].toastDownload;
       toast.classList.remove('hidden');
 
@@ -1370,15 +1380,11 @@
         } catch (cErr) {}
       }
 
-      downloadToastTimeout = setTimeout(() => {
-        toast.classList.add('hidden');
-      }, 7000);
-
       try {
         let resp = await fetch(endpointUrl);
-        
-        // If primary download endpoint returned error, attempt fallback to clean download (except for trimmed downloads)
-        if (!resp.ok && fallbackUrl && typeof fallbackUrl === 'string' && fallbackUrl.startsWith('http') && !endpointUrl.includes('download-clean') && !endpointUrl.includes('download-trim')) {
+
+        // If primary download endpoint returned error, attempt fallback to clean download (except for trimmed/audio-extracted downloads)
+        if (!resp.ok && fallbackUrl && typeof fallbackUrl === 'string' && fallbackUrl.startsWith('http') && !endpointUrl.includes('download-clean') && !endpointUrl.includes('download-trim') && !endpointUrl.includes('extract-audio')) {
           try {
             const cleanDl = `${API_BASE}/api/download-clean?url=${encodeURIComponent(fallbackUrl)}&filename=${encodeURIComponent(filename)}`;
             const cleanResp = await fetch(cleanDl);
@@ -1416,16 +1422,37 @@
         const blob = await resp.blob();
         const blobUrl = URL.createObjectURL(blob);
 
+        // Expose direct tap-to-save fallback inside toast for Android Chrome if automatic multi-download is throttled
+        if (saveBtn) {
+          saveBtn.href = blobUrl;
+          saveBtn.download = filename;
+          saveBtn.textContent = currentLang === 'bn' ? '💾 সেভ করুন' : '💾 Save File';
+          saveBtn.classList.remove('hidden');
+        }
+        toastText.textContent = currentLang === 'bn'
+          ? `✅ ফাইল তৈরি! ডাউনলোড শুরু না হলে "সেভ করুন" বাটনে ট্যাপ করুন: ${filename}`
+          : `✅ File ready! Tap "Save File" if download didn't start automatically.`;
+
         const a = document.createElement('a');
         a.href = blobUrl;
         a.download = filename;
+        a.rel = 'noopener';
         a.style.display = 'none';
         document.body.appendChild(a);
         a.click();
         setTimeout(() => {
           if (document.body.contains(a)) document.body.removeChild(a);
+        }, 1000);
+
+        clearTimeout(downloadToastTimeout);
+        downloadToastTimeout = setTimeout(() => {
+          toast.classList.add('hidden');
+          if (saveBtn) saveBtn.classList.add('hidden');
+        }, 20000);
+
+        setTimeout(() => {
           URL.revokeObjectURL(blobUrl);
-        }, 5000);
+        }, 120000);
 
       } catch (e) {
         console.warn('Blob download fetch error, attempting direct stream anchor:', e);
@@ -1433,13 +1460,14 @@
         const a = document.createElement('a');
         a.href = directUrl;
         a.download = filename;
+        a.rel = 'noopener';
         a.style.display = 'none';
         document.body.appendChild(a);
         a.click();
         setTimeout(() => {
           if (document.body.contains(a)) document.body.removeChild(a);
           toast.classList.add('hidden');
-        }, 3000);
+        }, 4000);
       }
     }
 
