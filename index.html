@@ -1381,6 +1381,7 @@
       }
 
       try {
+        let finalEndpointUrl = endpointUrl;
         let resp = await fetch(endpointUrl);
 
         // If primary download endpoint returned error, attempt fallback to clean download (except for trimmed/audio-extracted downloads)
@@ -1390,6 +1391,7 @@
             const cleanResp = await fetch(cleanDl);
             if (cleanResp.ok) {
               resp = cleanResp;
+              finalEndpointUrl = cleanDl;
             }
           } catch {}
         }
@@ -1418,11 +1420,45 @@
           return;
         }
 
-        // Convert verified stream directly to Blob so Chrome never gets "Site wasn't available" or "Resume"!
+        // On Android (Chrome, Custom Tabs & In-App WebViews), blob: links fail in DownloadManager; use verified HTTPS attachment endpoint directly
+        const isAndroid = /Android/i.test(navigator.userAgent || '');
+        if (isAndroid) {
+          try { await resp.body?.cancel(); } catch {}
+
+          if (saveBtn) {
+            saveBtn.href = finalEndpointUrl;
+            saveBtn.download = filename;
+            saveBtn.textContent = currentLang === 'bn' ? '💾 সেভ করুন' : '💾 Save File';
+            saveBtn.classList.remove('hidden');
+          }
+          toastText.textContent = currentLang === 'bn'
+            ? `✅ ফাইল তৈরি! ডাউনলোড শুরু না হলে "সেভ করুন" বাটনে ট্যাপ করুন: ${filename}`
+            : `✅ File ready! Tap "Save File" if download didn't start automatically.`;
+
+          const a = document.createElement('a');
+          a.href = finalEndpointUrl;
+          a.download = filename;
+          a.rel = 'noopener';
+          a.style.display = 'none';
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => {
+            if (document.body.contains(a)) document.body.removeChild(a);
+          }, 1000);
+
+          clearTimeout(downloadToastTimeout);
+          downloadToastTimeout = setTimeout(() => {
+            toast.classList.add('hidden');
+            if (saveBtn) saveBtn.classList.add('hidden');
+          }, 25000);
+          return;
+        }
+
+        // Convert verified stream directly to Blob on Desktop so Chrome never gets "Site wasn't available" or "Resume"!
         const blob = await resp.blob();
         const blobUrl = URL.createObjectURL(blob);
 
-        // Expose direct tap-to-save fallback inside toast for Android Chrome if automatic multi-download is throttled
+        // Expose direct tap-to-save fallback inside toast
         if (saveBtn) {
           saveBtn.href = blobUrl;
           saveBtn.download = filename;
@@ -1455,10 +1491,25 @@
         }, 120000);
 
       } catch (e) {
-        console.warn('Blob download fetch error, attempting direct stream anchor:', e);
-        const directUrl = fallbackUrl && fallbackUrl.startsWith('http') ? fallbackUrl : endpointUrl;
+        console.warn('Blob download fetch error, attempting safe endpoint anchor:', e);
+        const isUnsafeDirectHost = (u) => !u || u.includes('vidsnap.app') || u.includes('googlevideo.com');
+        let safeDirectUrl = endpointUrl;
+        if (fallbackUrl && typeof fallbackUrl === 'string' && fallbackUrl.startsWith('http') && !isUnsafeDirectHost(fallbackUrl) && !endpointUrl.includes('download-trim') && !endpointUrl.includes('extract-audio')) {
+          safeDirectUrl = `${API_BASE}/api/download-clean?url=${encodeURIComponent(fallbackUrl)}&filename=${encodeURIComponent(filename)}`;
+        }
+        if (saveBtn) {
+          saveBtn.href = safeDirectUrl;
+          saveBtn.download = filename;
+          saveBtn.textContent = currentLang === 'bn' ? '💾 সেভ করুন' : '💾 Save File';
+          saveBtn.classList.remove('hidden');
+        }
+        toastText.textContent = currentLang === 'bn'
+          ? `✅ ডাউনলোড শুরু না হলে "সেভ করুন" বাটনে ট্যাপ করুন: ${filename}`
+          : `✅ Tap "Save File" if download didn't start automatically.`;
+        toast.classList.remove('hidden');
+
         const a = document.createElement('a');
-        a.href = directUrl;
+        a.href = safeDirectUrl;
         a.download = filename;
         a.rel = 'noopener';
         a.style.display = 'none';
@@ -1466,8 +1517,13 @@
         a.click();
         setTimeout(() => {
           if (document.body.contains(a)) document.body.removeChild(a);
+        }, 1000);
+
+        clearTimeout(downloadToastTimeout);
+        downloadToastTimeout = setTimeout(() => {
           toast.classList.add('hidden');
-        }, 4000);
+          if (saveBtn) saveBtn.classList.add('hidden');
+        }, 25000);
       }
     }
 
