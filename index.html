@@ -1364,7 +1364,9 @@
       if (saveBtn) {
         saveBtn.classList.add('hidden');
         saveBtn.setAttribute('href', '#');
+        saveBtn.removeAttribute('target');
         saveBtn.setAttribute('download', '');
+        saveBtn.onclick = null;
       }
       toastText.textContent = i18n[currentLang].toastDownload;
       toast.classList.remove('hidden');
@@ -1420,15 +1422,25 @@
           return;
         }
 
-        // On Android (Chrome, Custom Tabs & In-App WebViews), blob: links fail in DownloadManager; use verified HTTPS attachment endpoint directly
+        // On Android (Chrome, Custom Tabs & In-App WebViews), use verified HTTPS attachment URL with unique _dl and target=_blank on Save File so sequential 2nd/3rd downloads are never blocked
         const isAndroid = /Android/i.test(navigator.userAgent || '');
         if (isAndroid) {
           try { await resp.body?.cancel(); } catch {}
 
+          const sep = finalEndpointUrl.includes('?') ? '&' : '?';
+          const androidDlUrl = `${finalEndpointUrl}${sep}_dl=${Date.now()}`;
+
           if (saveBtn) {
-            saveBtn.href = finalEndpointUrl;
-            saveBtn.download = filename;
+            saveBtn.removeAttribute('download');
+            saveBtn.target = '_blank';
+            saveBtn.rel = 'noopener';
+            saveBtn.href = androidDlUrl;
             saveBtn.textContent = currentLang === 'bn' ? '💾 সেভ করুন' : '💾 Save File';
+            saveBtn.onclick = function() {
+              const freshSep = finalEndpointUrl.includes('?') ? '&' : '?';
+              saveBtn.href = `${finalEndpointUrl}${freshSep}_dl=${Date.now()}`;
+              return true;
+            };
             saveBtn.classList.remove('hidden');
           }
           toastText.textContent = currentLang === 'bn'
@@ -1436,7 +1448,7 @@
             : `✅ File ready! Tap "Save File" if download didn't start automatically.`;
 
           const a = document.createElement('a');
-          a.href = finalEndpointUrl;
+          a.href = androidDlUrl;
           a.download = filename;
           a.rel = 'noopener';
           a.style.display = 'none';
@@ -1460,6 +1472,8 @@
 
         // Expose direct tap-to-save fallback inside toast
         if (saveBtn) {
+          saveBtn.removeAttribute('target');
+          saveBtn.onclick = null;
           saveBtn.href = blobUrl;
           saveBtn.download = filename;
           saveBtn.textContent = currentLang === 'bn' ? '💾 সেভ করুন' : '💾 Save File';
@@ -1497,9 +1511,26 @@
         if (fallbackUrl && typeof fallbackUrl === 'string' && fallbackUrl.startsWith('http') && !isUnsafeDirectHost(fallbackUrl) && !endpointUrl.includes('download-trim') && !endpointUrl.includes('extract-audio')) {
           safeDirectUrl = `${API_BASE}/api/download-clean?url=${encodeURIComponent(fallbackUrl)}&filename=${encodeURIComponent(filename)}`;
         }
+        const isAndroidErr = /Android/i.test(navigator.userAgent || '');
+        const errSep = safeDirectUrl.includes('?') ? '&' : '?';
+        const androidSafeUrl = isAndroidErr ? `${safeDirectUrl}${errSep}_dl=${Date.now()}` : safeDirectUrl;
+
         if (saveBtn) {
-          saveBtn.href = safeDirectUrl;
-          saveBtn.download = filename;
+          if (isAndroidErr) {
+            saveBtn.removeAttribute('download');
+            saveBtn.target = '_blank';
+            saveBtn.onclick = function() {
+              const s = safeDirectUrl.includes('?') ? '&' : '?';
+              saveBtn.href = `${safeDirectUrl}${s}_dl=${Date.now()}`;
+              return true;
+            };
+          } else {
+            saveBtn.removeAttribute('target');
+            saveBtn.download = filename;
+            saveBtn.onclick = null;
+          }
+          saveBtn.rel = 'noopener';
+          saveBtn.href = androidSafeUrl;
           saveBtn.textContent = currentLang === 'bn' ? '💾 সেভ করুন' : '💾 Save File';
           saveBtn.classList.remove('hidden');
         }
@@ -1509,7 +1540,7 @@
         toast.classList.remove('hidden');
 
         const a = document.createElement('a');
-        a.href = safeDirectUrl;
+        a.href = androidSafeUrl;
         a.download = filename;
         a.rel = 'noopener';
         a.style.display = 'none';
