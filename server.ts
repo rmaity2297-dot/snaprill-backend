@@ -206,7 +206,7 @@ async function ensureAccessibleYouTubeUrl(url?: string): Promise<string | undefi
 
   if (url.includes('googlevideo.com') && !url.includes('api.vidsnap.app/proxy')) {
     const proxied = `https://api.vidsnap.app/proxy?u=${encodeURIComponent(url)}`;
-    if (await probe(proxied, 5500)) {
+    if (await probe(proxied, 8000)) {
       return proxied;
     }
   }
@@ -214,8 +214,22 @@ async function ensureAccessibleYouTubeUrl(url?: string): Promise<string | undefi
   return undefined;
 }
 
+// Short-lived in-memory Clipto stream URL cache (avoids rate limits across resolve -> download -> trim)
+const cliptoMetaCache = new Map<string, {
+  data: {
+    title?: string;
+    author?: string;
+    thumbnail?: string;
+    duration?: number;
+    muxedMp4Url?: string;
+    hdVideoUrl?: string;
+    audioUrl?: string;
+  };
+  expiresAt: number;
+}>();
+
 // Helper: Extract YouTube metadata & direct streams via Clipto YouTube API (works reliably on cloud/datacenter IPs)
-async function extractYouTubeWithClipto(ytId: string): Promise<{
+async function extractYouTubeWithClipto(ytId: string, forceRefresh = false): Promise<{
   title?: string;
   author?: string;
   thumbnail?: string;
@@ -224,6 +238,13 @@ async function extractYouTubeWithClipto(ytId: string): Promise<{
   hdVideoUrl?: string;
   audioUrl?: string;
 } | null> {
+  if (!forceRefresh) {
+    const cached = cliptoMetaCache.get(ytId);
+    if (cached && Date.now() < cached.expiresAt) {
+      return cached.data;
+    }
+  }
+
   let bestMeta: {
     title?: string;
     author?: string;
@@ -237,7 +258,7 @@ async function extractYouTubeWithClipto(ytId: string): Promise<{
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const controller = new AbortController();
-      const t = setTimeout(() => controller.abort(), 9000);
+      const t = setTimeout(() => controller.abort(), 12000);
       const resp = await fetch('https://www.clipto.com/api/youtube', {
         method: 'POST',
         signal: controller.signal,
@@ -308,6 +329,11 @@ async function extractYouTubeWithClipto(ytId: string): Promise<{
       bestMeta = candidate;
 
       if (candidate.muxedMp4Url && candidate.hdVideoUrl && candidate.audioUrl) {
+        cliptoMetaCache.set(ytId, { data: candidate, expiresAt: Date.now() + 3 * 60 * 1000 });
+        return candidate;
+      }
+      if (candidate.hdVideoUrl && candidate.audioUrl && attempt >= 1) {
+        cliptoMetaCache.set(ytId, { data: candidate, expiresAt: Date.now() + 3 * 60 * 1000 });
         return candidate;
       }
     } catch {
@@ -315,6 +341,9 @@ async function extractYouTubeWithClipto(ytId: string): Promise<{
     }
   }
 
+  if (bestMeta && (bestMeta.muxedMp4Url || bestMeta.hdVideoUrl || bestMeta.audioUrl)) {
+    cliptoMetaCache.set(ytId, { data: bestMeta, expiresAt: Date.now() + 3 * 60 * 1000 });
+  }
   return bestMeta;
 }
 
@@ -363,34 +392,73 @@ async function hasAudioAndVideoStreams(filePath: string): Promise<boolean> {
   });
 }
 
-async function saveCachedMediaFile(cacheKey: string, srcPath: string) {
-  if (!cacheKey || !srcPath) return;
+function pruneSnaprillTmp(maxTotalBytes = 180 * 1024 * 1024, maxAgeMs = 15 * 60 * 1000, keepPath?: string) {
   try {
-    if (!existsSync(srcPath) || statSync(srcPath).size <= 10000) return;
-    const validAv = await hasAudioAndVideoStreams(srcPath);
-    if (!validAv) return;
-    const dest = `/tmp/snaprill_av_${cacheKey}.mp4`;
-    if (srcPath !== dest) {
-      fs.copyFileSync(srcPath, dest);
-    }
-    // Prune stale cache entries (> 15 min)
+    const entries: { fp: string; size: number; mtimeMs: number }[] = [];
+    let totalBytes = 0;
     for (const f of fs.readdirSync('/tmp')) {
-      if (f.startsWith('snaprill_av_') || f.startsWith('snaprill_src_')) {
+      if (f.startsWith('snaprill_av_') || f.startsWith('snaprill_src_') || f.startsWith('snaprill_trim_') || f.startsWith('snaprill_tsrc_') || f.startsWith('snaprill_ytmp3_') || f.startsWith('snaprill_yt720_')) {
         const fp = `/tmp/${f}`;
         try {
-          if (Date.now() - statSync(fp).mtimeMs > 15 * 60 * 1000) {
+          const st = statSync(fp);
+          if (fp !== keepPath && Date.now() - st.mtimeMs > maxAgeMs) {
             fs.unlinkSync(fp);
+          } else {
+            entries.push({ fp, size: st.size, mtimeMs: st.mtimeMs });
+            totalBytes += st.size;
           }
+        } catch {}
+      }
+    }
+    if (totalBytes > maxTotalBytes) {
+      entries.sort((a, b) => a.mtimeMs - b.mtimeMs);
+      for (const entry of entries) {
+        if (totalBytes <= maxTotalBytes) break;
+        if (entry.fp === keepPath) continue;
+        try {
+          fs.unlinkSync(entry.fp);
+          totalBytes -= entry.size;
         } catch {}
       }
     }
   } catch {}
 }
 
+async function saveCachedMediaFile(cacheKey: string, srcPath: string, moveSrc = false): Promise<string | null> {
+  if (!cacheKey || !srcPath) return null;
+  try {
+    if (!existsSync(srcPath)) return null;
+    const srcSize = statSync(srcPath).size;
+    if (srcSize <= 10000 || srcSize > 200 * 1024 * 1024) return null;
+    const validAv = await hasAudioAndVideoStreams(srcPath);
+    if (!validAv) return null;
+    const dest = `/tmp/snaprill_av_${cacheKey}.mp4`;
+    if (srcSize > 30 * 1024 * 1024) {
+      pruneSnaprillTmp(150 * 1024 * 1024, 15 * 60 * 1000, dest);
+    }
+    if (srcPath !== dest) {
+      if (moveSrc) {
+        try {
+          fs.renameSync(srcPath, dest);
+        } catch {
+          fs.copyFileSync(srcPath, dest);
+          try { fs.unlinkSync(srcPath); } catch {}
+        }
+      } else {
+        fs.copyFileSync(srcPath, dest);
+      }
+    }
+    pruneSnaprillTmp(180 * 1024 * 1024, 15 * 60 * 1000, dest);
+    return existsSync(dest) ? dest : null;
+  } catch {
+    return null;
+  }
+}
+
 // Background pre-cache registry so downloads click -> finish within a few seconds
 const inFlightCacheJobs = new Map<string, Promise<string | null>>();
 
-async function waitForCachedOrInFlight(cacheKey: string): Promise<string | null> {
+async function waitForCachedOrInFlight(cacheKey: string, maxWaitMs = 60000): Promise<string | null> {
   const ready = getCachedMediaPath(cacheKey);
   if (ready) return ready;
   const activeJob = inFlightCacheJobs.get(cacheKey);
@@ -398,7 +466,7 @@ async function waitForCachedOrInFlight(cacheKey: string): Promise<string | null>
     try {
       await Promise.race([
         activeJob,
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 60000)),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), maxWaitMs)),
       ]);
     } catch {}
     return getCachedMediaPath(cacheKey);
@@ -406,35 +474,119 @@ async function waitForCachedOrInFlight(cacheKey: string): Promise<string | null>
   return null;
 }
 
-async function fetchFileForCache(url: string, destPath: string): Promise<boolean> {
+async function downloadUrlToFile(
+  url: string,
+  destPath: string,
+  timeoutMs = 150000,
+  extraHeaders: Record<string, string> = {},
+  minBytes = 5000
+): Promise<boolean> {
   try {
+    if (!url || !url.startsWith('http')) return false;
     const { Readable } = await import('stream');
     const { pipeline } = await import('stream/promises');
+    const baseHeaders: Record<string, string> = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+      ...(url.includes('instagram') ? { Referer: 'https://www.instagram.com/' } : {}),
+      ...(url.includes('tiktok') || url.includes('tikwm') ? { Referer: 'https://www.tiktok.com/' } : {}),
+      ...extraHeaders,
+    };
+
+    // YouTube / vidsnap streams throttle or drop non-range single GETs; 1.5 MB Range chunks complete in ~1–3s
+    if (url.includes('googlevideo.com') || url.includes('api.vidsnap.app/proxy')) {
+      const deadline = Date.now() + timeoutMs;
+      const chunkSize = 1536 * 1024;
+      let offset = 0;
+      let total: number | null = null;
+      let emptyRetries = 0;
+      fs.writeFileSync(destPath, Buffer.alloc(0));
+
+      while ((total === null || offset < total) && Date.now() < deadline) {
+        const end = total !== null ? Math.min(offset + chunkSize - 1, total - 1) : (offset + chunkSize - 1);
+        const ctrl = new AbortController();
+        const chunkWait = Math.min(25000, Math.max(5000, deadline - Date.now()));
+        const timer = setTimeout(() => ctrl.abort(), chunkWait);
+        try {
+          const resp = await fetch(url, {
+            headers: { ...baseHeaders, Range: `bytes=${offset}-${end}` },
+            redirect: 'follow',
+            signal: ctrl.signal,
+          });
+          const ct = (resp.headers.get('content-type') || '').toLowerCase();
+          if (!resp.ok || ct.includes('json') || ct.includes('html') || ct.includes('image')) {
+            try { await resp.body?.cancel(); } catch {}
+            if (offset === 0) {
+              try { if (existsSync(destPath)) fs.unlinkSync(destPath); } catch {}
+              return false;
+            }
+            if (++emptyRetries > 2) break;
+            continue;
+          }
+          if (resp.status === 200) {
+            const ab = await resp.arrayBuffer();
+            fs.writeFileSync(destPath, Buffer.from(ab));
+            return existsSync(destPath) && statSync(destPath).size >= minBytes;
+          }
+          const cr = resp.headers.get('content-range') || '';
+          const m = cr.match(/\/(\d+)$/);
+          if (m) total = parseInt(m[1], 10);
+          const buf = Buffer.from(await resp.arrayBuffer());
+          if (buf.length === 0) {
+            if (++emptyRetries > 2) break;
+            continue;
+          }
+          emptyRetries = 0;
+          fs.appendFileSync(destPath, buf);
+          offset += buf.length;
+          if (total === null && buf.length < chunkSize) break;
+        } catch {
+          if (++emptyRetries > 2) {
+            try { if (existsSync(destPath)) fs.unlinkSync(destPath); } catch {}
+            return false;
+          }
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+      const ok = existsSync(destPath) && statSync(destPath).size >= minBytes && (total === null || offset >= total);
+      if (!ok) {
+        try { if (existsSync(destPath)) fs.unlinkSync(destPath); } catch {}
+      }
+      return ok;
+    }
+
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 65000);
-    const r = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-        ...(url.includes('instagram') ? { Referer: 'https://www.instagram.com/' } : {}),
-        ...(url.includes('tiktok') || url.includes('tikwm') ? { Referer: 'https://www.tiktok.com/' } : {}),
-      },
-      redirect: 'follow',
-      signal: ctrl.signal,
-    });
-    clearTimeout(timer);
-    const ct = (r.headers.get('content-type') || '').toLowerCase();
-    if (!r.ok || !r.body || ct.includes('json') || ct.includes('html') || ct.includes('image')) return false;
-    await pipeline(Readable.fromWeb(r.body as any), fs.createWriteStream(destPath));
-    return existsSync(destPath) && statSync(destPath).size > 10000;
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const r = await fetch(url, {
+        headers: baseHeaders,
+        redirect: 'follow',
+        signal: ctrl.signal,
+      });
+      const ct = (r.headers.get('content-type') || '').toLowerCase();
+      if (!r.ok || !r.body || ct.includes('json') || ct.includes('html') || ct.includes('image')) return false;
+      await pipeline(Readable.fromWeb(r.body as any), fs.createWriteStream(destPath));
+      return existsSync(destPath) && statSync(destPath).size >= minBytes;
+    } finally {
+      clearTimeout(timer);
+    }
   } catch {
+    try { if (existsSync(destPath)) fs.unlinkSync(destPath); } catch {}
     return false;
   }
 }
 
+async function fetchFileForCache(url: string, destPath: string, timeoutMs = 90000): Promise<boolean> {
+  return downloadUrlToFile(url, destPath, timeoutMs, {}, 10000);
+}
+
 function triggerBackgroundYouTubePrecache(
   ytId: string,
-  cliptoHint?: { muxedMp4Url?: string; hdVideoUrl?: string; audioUrl?: string } | null
+  cliptoHint?: { muxedMp4Url?: string; hdVideoUrl?: string; audioUrl?: string } | null,
+  durationSec = 0
 ) {
+  // Skip heavy background 1080p video pre-cache for long videos (> 2.5 min) so audio/trim stay instant and RAM stays low
+  if (durationSec > 150) return;
   const cacheKey = getMediaCacheKey(ytId);
   if (!cacheKey || getCachedMediaPath(cacheKey) || inFlightCacheJobs.has(cacheKey)) return;
 
@@ -465,12 +617,12 @@ function triggerBackgroundYouTubePrecache(
           const muxOk = await new Promise<boolean>((resolve) => {
             exec(
               `ffmpeg -y -i "${vTmp}" -i "${aTmp}" -c copy -movflags +faststart "${outMux}"`,
-              { timeout: 30000 },
+              { timeout: 45000 },
               (err) => resolve(!err && existsSync(outMux) && statSync(outMux).size > 10000)
             );
           });
           if (muxOk) {
-            await saveCachedMediaFile(cacheKey, outMux);
+            await saveCachedMediaFile(cacheKey, outMux, true);
             return getCachedMediaPath(cacheKey);
           }
         }
@@ -478,7 +630,7 @@ function triggerBackgroundYouTubePrecache(
 
       if (info.muxedMp4Url) {
         if (await fetchFileForCache(info.muxedMp4Url, outMux)) {
-          await saveCachedMediaFile(cacheKey, outMux);
+          await saveCachedMediaFile(cacheKey, outMux, true);
           return getCachedMediaPath(cacheKey);
         }
       }
@@ -814,7 +966,7 @@ app.all(['/api/resolve', '/api/resolve-video'], async (req: Request, res: Respon
           ]
         };
 
-        triggerBackgroundYouTubePrecache(ytId, resolvedClipto);
+        triggerBackgroundYouTubePrecache(ytId, resolvedClipto, ytDuration);
         return res.json({ success: true, data: resolved });
       }
     }
@@ -1241,7 +1393,9 @@ app.get('/api/extract-audio', async (req: Request, res: Response) => {
     let effectiveInput = tempInput;
     let isLocalOrCached = false;
     const cacheKey = getMediaCacheKey(ytIdParam, origUrlParam || targetUrl);
-    const cachedSrc = await waitForCachedOrInFlight(cacheKey);
+    const cachedSrc = ytIdParam
+      ? getCachedMediaPath(cacheKey)
+      : await waitForCachedOrInFlight(cacheKey);
     if (cachedSrc) {
       effectiveInput = cachedSrc;
       isLocalOrCached = true;
@@ -1259,33 +1413,10 @@ app.get('/api/extract-audio', async (req: Request, res: Response) => {
 
     const downloadAudioInput = async (urlToFetch: string): Promise<boolean> => {
       const attempt = async (u: string): Promise<boolean> => {
-        try {
-          if (!u || !u.startsWith('http')) return false;
-          const fetchHeaders: Record<string, string> = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-          };
-          if (u.includes('instagram')) fetchHeaders['Referer'] = 'https://www.instagram.com/';
-          if (u.includes('tiktok') || u.includes('tikwm')) fetchHeaders['Referer'] = 'https://www.tiktok.com/';
-
-          const controller = new AbortController();
-          const timer = setTimeout(() => controller.abort(), 60000);
-          const remoteResp = await fetch(u, { headers: fetchHeaders, redirect: 'follow', signal: controller.signal });
-          clearTimeout(timer);
-
-          const ct = (remoteResp.headers.get('content-type') || '').toLowerCase();
-          if (!remoteResp.ok || !remoteResp.body || ct.includes('image') || ct.includes('json') || ct.includes('html')) {
-            return false;
-          }
-
-          const { pipeline } = await import('stream/promises');
-          const { Readable } = await import('stream');
-          const fileStream = createWriteStream(tempInput);
-          await pipeline(Readable.fromWeb(remoteResp.body as any), fileStream);
-          if (existsSync(tempInput) && statSync(tempInput).size > 5000) {
-            effectiveInput = tempInput;
-            return true;
-          }
-        } catch {}
+        if (await downloadUrlToFile(u, tempInput, 150000, {}, 5000)) {
+          effectiveInput = tempInput;
+          return true;
+        }
         return false;
       };
 
@@ -1343,7 +1474,7 @@ app.get('/api/extract-audio', async (req: Request, res: Response) => {
     }
 
     // Extract high-quality MP3 audio using ffmpeg from effectiveInput (cached, local, or fetched temp)
-    exec(`ffmpeg -y -i "${effectiveInput}" -vn -c:a libmp3lame -b:a 192k "${tempOutput}"`, { timeout: 45000 }, (ffmpegErr) => {
+    exec(`ffmpeg -y -threads 1 -i "${effectiveInput}" -vn -c:a libmp3lame -b:a 192k "${tempOutput}"`, { timeout: 120000 }, (ffmpegErr) => {
       if (existsSync(tempInput)) {
         try { unlinkSync(tempInput); } catch {}
       }
@@ -1382,6 +1513,25 @@ app.get('/api/extract-audio', async (req: Request, res: Response) => {
 });
 
 // 3.2 YouTube Dedicated Download Endpoint (Direct to local folder)
+const inFlightYtMp3Jobs = new Map<string, Promise<string | null>>();
+const inFlightYt1080Jobs = new Map<string, Promise<string | null>>();
+
+function getCachedYtMp3Path(ytId: string): string | null {
+  const cleanId = (ytId || '').trim().replace(/[^a-zA-Z0-9_-]/g, '');
+  if (!cleanId) return null;
+  const p = `/tmp/snaprill_ytmp3_${cleanId}.mp3`;
+  try {
+    if (existsSync(p)) {
+      const st = statSync(p);
+      if (st.size > 5000 && (Date.now() - st.mtimeMs) < 10 * 60 * 1000) {
+        return p;
+      }
+      try { fs.unlinkSync(p); } catch {}
+    }
+  } catch {}
+  return null;
+}
+
 app.get('/api/download-youtube', async (req: Request, res: Response) => {
   const ytId = (req.query.id as string || '').trim();
   const format = (req.query.format as string || '1080').trim();
@@ -1397,12 +1547,58 @@ app.get('/api/download-youtube', async (req: Request, res: Response) => {
   try {
     const { Readable } = await import('stream');
     const { pipeline } = await import('stream/promises');
-
-    // Fast path: reuse cached or already pre-fetching 1080p YouTube video (makes HD / MP3 near-instant!)
+    const cleanYtKey = ytId.replace(/[^a-zA-Z0-9_-]/g, '');
     const ytCacheKey = getMediaCacheKey(ytId);
-    const cachedYtMp4 = (format === '720')
+
+    const sendReadyFile = (filePath: string, contentType: string, deleteAfter = false) => {
+      res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Length', statSync(filePath).size);
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      return res.download(filePath, cleanFilename, () => {
+        if (deleteAfter) {
+          try { if (existsSync(filePath)) fs.unlinkSync(filePath); } catch {}
+        }
+      });
+    };
+
+    // Instant MP3 cache/dedup path (prevents Android 2nd DownloadManager GET / Save File from re-converting 6-7 min audio)
+    if (ext === 'mp3') {
+      const readyMp3 = getCachedYtMp3Path(ytId);
+      if (readyMp3) {
+        return sendReadyFile(readyMp3, 'audio/mpeg', false);
+      }
+      const activeMp3 = inFlightYtMp3Jobs.get(cleanYtKey);
+      if (activeMp3) {
+        const mp3Path = await Promise.race([
+          activeMp3,
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 120000)),
+        ]).catch(() => null);
+        if (mp3Path && existsSync(mp3Path) && statSync(mp3Path).size > 5000) {
+          return sendReadyFile(mp3Path, 'audio/mpeg', false);
+        }
+      }
+    }
+
+    // Fast path: reuse cached MP4 (NOTE: MP3 only checks synchronous cache so it NEVER stalls 60s behind a 1080p video pre-cache!)
+    let cachedYtMp4 = (ext === 'mp3' || format === '720')
       ? getCachedMediaPath(ytCacheKey)
-      : await waitForCachedOrInFlight(ytCacheKey);
+      : await waitForCachedOrInFlight(ytCacheKey, 150000);
+
+    if (!cachedYtMp4 && format === '1080') {
+      const active1080 = inFlightYt1080Jobs.get(ytCacheKey);
+      if (active1080) {
+        const joinedPath = await Promise.race([
+          active1080,
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 150000)),
+        ]).catch(() => null);
+        if (joinedPath && existsSync(joinedPath) && statSync(joinedPath).size > 10000) {
+          cachedYtMp4 = joinedPath;
+        }
+      }
+    }
+
     if (cachedYtMp4) {
       if (ext === 'mp3') {
         const ts = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -1410,64 +1606,88 @@ app.get('/api/download-youtube', async (req: Request, res: Response) => {
         const { exec } = await import('child_process');
         const mp3Ok = await new Promise<boolean>((resolve) => {
           exec(
-            `ffmpeg -y -i "${cachedYtMp4}" -vn -c:a libmp3lame -b:a 192k "${outMp3}"`,
-            { timeout: 30000 },
+            `ffmpeg -y -threads 1 -i "${cachedYtMp4}" -vn -c:a libmp3lame -b:a 192k "${outMp3}"`,
+            { timeout: 120000 },
             (err) => resolve(!err && existsSync(outMp3) && statSync(outMp3).size > 5000)
           );
         });
         if (mp3Ok) {
-          res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
-          res.setHeader('Content-Type', 'audio/mpeg');
-          res.setHeader('Content-Length', statSync(outMp3).size);
-          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-          res.setHeader('Access-Control-Allow-Origin', '*');
-          return res.download(outMp3, cleanFilename, () => {
-            try { if (existsSync(outMp3)) fs.unlinkSync(outMp3); } catch {}
-          });
+          const cachedDest = `/tmp/snaprill_ytmp3_${cleanYtKey}.mp3`;
+          if (statSync(outMp3).size <= 35 * 1024 * 1024) {
+            try {
+              fs.renameSync(outMp3, cachedDest);
+              pruneSnaprillTmp(180 * 1024 * 1024, 15 * 60 * 1000, cachedDest);
+              return sendReadyFile(cachedDest, 'audio/mpeg', false);
+            } catch {}
+          }
+          return sendReadyFile(outMp3, 'audio/mpeg', true);
         }
         try { if (existsSync(outMp3)) fs.unlinkSync(outMp3); } catch {}
-      } else if (format === '1080') {
-        res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
-        res.setHeader('Content-Type', 'video/mp4');
-        res.setHeader('Content-Length', statSync(cachedYtMp4).size);
-        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        return res.download(cachedYtMp4, cleanFilename);
+      } else if (format === '1080' || format === '720') {
+        return sendReadyFile(cachedYtMp4, 'video/mp4', false);
       }
     }
 
-    // 0. If direct stream URL is already known and passed (not 1080p mux or mp3 re-encode), stream it immediately!
+    // 0. If direct stream URL is already known and passed (not 1080p mux or mp3 re-encode), use fast cached Range download for YouTube proxy URLs or stream directly
     const streamUrlParam = (req.query.url as string || '').trim();
-    if (streamUrlParam && streamUrlParam.startsWith('http') && !streamUrlParam.includes('ytimg.com') && format !== '1080' && ext !== 'mp3') {
+    if (format === '720' && cleanYtKey) {
+      const yt720Cached = `/tmp/snaprill_yt720_${cleanYtKey}.mp4`;
       try {
-        let streamResp = await fetch(streamUrlParam);
-        if (!streamResp.ok && streamUrlParam.includes('googlevideo.com') && !streamUrlParam.includes('api.vidsnap.app/proxy')) {
-          streamResp = await fetch(`https://api.vidsnap.app/proxy?u=${encodeURIComponent(streamUrlParam)}`);
-        }
-        const ct = (streamResp.headers.get('content-type') || '').toLowerCase();
-        if (streamResp.ok && streamResp.body && !ct.includes('json') && !ct.includes('html')) {
-          res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
-          res.setHeader('Content-Type', mimeType);
-          res.setHeader('Content-Transfer-Encoding', 'binary');
-          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-          res.setHeader('Access-Control-Allow-Origin', '*');
-          const cl = streamResp.headers.get('content-length');
-          if (cl) res.setHeader('Content-Length', cl);
-
-          await pipeline(Readable.fromWeb(streamResp.body as any), res);
-          return;
+        if (existsSync(yt720Cached) && statSync(yt720Cached).size > 10000 && (Date.now() - statSync(yt720Cached).mtimeMs) < 10 * 60 * 1000) {
+          return sendReadyFile(yt720Cached, 'video/mp4', false);
         }
       } catch {}
     }
+    if (streamUrlParam && streamUrlParam.startsWith('http') && !streamUrlParam.includes('ytimg.com') && format !== '1080' && ext !== 'mp3') {
+      if (streamUrlParam.includes('googlevideo.com') || streamUrlParam.includes('api.vidsnap.app/proxy')) {
+        const yt720Dest = `/tmp/snaprill_yt720_${cleanYtKey}.mp4`;
+        const target720 = (streamUrlParam.includes('googlevideo.com') && !streamUrlParam.includes('api.vidsnap.app/proxy'))
+          ? `https://api.vidsnap.app/proxy?u=${encodeURIComponent(streamUrlParam)}`
+          : streamUrlParam;
+        if (await downloadUrlToFile(target720, yt720Dest, 150000, {}, 10000)) {
+          pruneSnaprillTmp(180 * 1024 * 1024, 15 * 60 * 1000, yt720Dest);
+          return sendReadyFile(yt720Dest, 'video/mp4', false);
+        }
+      } else {
+        try {
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), 150000);
+          try {
+            const streamResp = await fetch(streamUrlParam, { signal: ctrl.signal });
+            const ct = (streamResp.headers.get('content-type') || '').toLowerCase();
+            if (streamResp.ok && streamResp.body && !ct.includes('json') && !ct.includes('html')) {
+              res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
+              res.setHeader('Content-Type', mimeType);
+              res.setHeader('Content-Transfer-Encoding', 'binary');
+              res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+              res.setHeader('Access-Control-Allow-Origin', '*');
+              const cl = streamResp.headers.get('content-length');
+              if (cl) res.setHeader('Content-Length', cl);
 
-    // 1. Try btch-downloader direct authenticated proxy stream
+              await pipeline(Readable.fromWeb(streamResp.body as any), res);
+              return;
+            }
+          } finally {
+            clearTimeout(timer);
+          }
+        } catch {}
+      }
+    }
+
+    // 1. Try btch-downloader direct authenticated proxy stream (bounded to 8s so long videos fall through to Clipto immediately)
     try {
       const { youtube } = await import('btch-downloader');
-      const ytData: any = await youtube(`https://www.youtube.com/watch?v=${ytId}`);
+      const ytData: any = await Promise.race([
+        youtube(`https://www.youtube.com/watch?v=${ytId}`),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('btch timeout')), 8000)),
+      ]);
       const directUrl = (ext === 'mp3' && ytData?.mp3) ? ytData.mp3 : (ytData?.mp4 || ytData?.mp3);
 
       if (directUrl && typeof directUrl === 'string' && directUrl.startsWith('http')) {
-        const streamResp = await fetch(directUrl);
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 150000);
+        const streamResp = await fetch(directUrl, { signal: ctrl.signal });
+        clearTimeout(timer);
         if (streamResp.ok && streamResp.body) {
           res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
           res.setHeader('Content-Type', mimeType);
@@ -1489,53 +1709,64 @@ app.get('/api/download-youtube', async (req: Request, res: Response) => {
     try {
       const clipto = await extractYouTubeWithClipto(ytId);
       const downloadToTmp = async (url: string, destPath: string): Promise<boolean> => {
-        try {
-          const ctrl = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(), 65000);
-          const r = await fetch(url, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36' },
-            signal: ctrl.signal,
-          });
-          clearTimeout(timer);
-          const ct = (r.headers.get('content-type') || '').toLowerCase();
-          if (!r.ok || !r.body || ct.includes('json') || ct.includes('html')) return false;
-          await pipeline(Readable.fromWeb(r.body as any), fs.createWriteStream(destPath));
-          return existsSync(destPath) && statSync(destPath).size > 5000;
-        } catch {
-          return false;
-        }
+        return downloadUrlToFile(url, destPath, 150000, {}, 5000);
       };
 
       if (clipto) {
         if (ext === 'mp3' && (clipto.audioUrl || clipto.muxedMp4Url)) {
           const srcAudio = clipto.audioUrl || clipto.muxedMp4Url!;
-          const ts = Date.now();
+          let resolveMp3Job: (v: string | null) => void = () => {};
+          const mp3JobPromise = new Promise<string | null>((r) => { resolveMp3Job = r; });
+          inFlightYtMp3Jobs.set(cleanYtKey, mp3JobPromise);
+
+          const ts = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
           const inTmp = `/tmp/yt_aud_in_${ts}.m4a`;
           const outMp3 = `/tmp/yt_aud_${ts}.mp3`;
           const { exec } = await import('child_process');
-          const fetchedIn = await downloadToTmp(srcAudio, inTmp);
-          const ffmpegInput = fetchedIn ? inTmp : srcAudio;
-          const mp3Ok = await new Promise<boolean>((resolve) => {
-            exec(
-              `ffmpeg -y -i "${ffmpegInput}" -vn -c:a libmp3lame -b:a 192k "${outMp3}"`,
-              { timeout: 30000 },
-              (err) => resolve(!err && existsSync(outMp3) && statSync(outMp3).size > 5000)
-            );
-          });
-          try { if (existsSync(inTmp)) fs.unlinkSync(inTmp); } catch {}
-          if (mp3Ok) {
-            res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
-            res.setHeader('Content-Type', 'audio/mpeg');
-            res.setHeader('Content-Length', statSync(outMp3).size);
-            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-            res.setHeader('Access-Control-Allow-Origin', '*');
-            return res.download(outMp3, cleanFilename, () => {
-              try { if (existsSync(outMp3)) fs.unlinkSync(outMp3); } catch {}
-            });
-          }
-          try { if (existsSync(outMp3)) fs.unlinkSync(outMp3); } catch {}
+          let mp3FinalPath: string | null = null;
+          let mp3IsCached = false;
 
-          const audioResp = await fetch(srcAudio);
+          try {
+            const fetchedIn = await downloadToTmp(srcAudio, inTmp);
+            const ffmpegInput = fetchedIn ? inTmp : srcAudio;
+            const mp3Ok = await new Promise<boolean>((resolve) => {
+              exec(
+                `ffmpeg -y -threads 1 -i "${ffmpegInput}" -vn -c:a libmp3lame -b:a 192k "${outMp3}"`,
+                { timeout: 120000 },
+                (err) => resolve(!err && existsSync(outMp3) && statSync(outMp3).size > 5000)
+              );
+            });
+            try { if (existsSync(inTmp)) fs.unlinkSync(inTmp); } catch {}
+            if (mp3Ok) {
+              const cachedDest = `/tmp/snaprill_ytmp3_${cleanYtKey}.mp3`;
+              if (statSync(outMp3).size <= 35 * 1024 * 1024) {
+                try {
+                  fs.renameSync(outMp3, cachedDest);
+                  pruneSnaprillTmp(180 * 1024 * 1024, 15 * 60 * 1000, cachedDest);
+                  mp3FinalPath = cachedDest;
+                  mp3IsCached = true;
+                } catch {
+                  mp3FinalPath = outMp3;
+                }
+              } else {
+                mp3FinalPath = outMp3;
+              }
+            } else {
+              try { if (existsSync(outMp3)) fs.unlinkSync(outMp3); } catch {}
+            }
+          } finally {
+            inFlightYtMp3Jobs.delete(cleanYtKey);
+            resolveMp3Job(mp3IsCached ? mp3FinalPath : null);
+          }
+
+          if (mp3FinalPath && existsSync(mp3FinalPath)) {
+            return sendReadyFile(mp3FinalPath, 'audio/mpeg', !mp3IsCached);
+          }
+
+          const audioCtrl = new AbortController();
+          const audioTimer = setTimeout(() => audioCtrl.abort(), 150000);
+          const audioResp = await fetch(srcAudio, { signal: audioCtrl.signal });
+          clearTimeout(audioTimer);
           const ct = (audioResp.headers.get('content-type') || '').toLowerCase();
           if (audioResp.ok && audioResp.body && !ct.includes('json') && !ct.includes('html')) {
             res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
@@ -1550,44 +1781,73 @@ app.get('/api/download-youtube', async (req: Request, res: Response) => {
           }
         }
         if (ext === 'mp4') {
-          if (format === '1080' && clipto.hdVideoUrl && clipto.audioUrl) {
-            const ts = Date.now();
+          const shouldMuxHd = (format === '1080' || !clipto.muxedMp4Url) && Boolean(clipto.hdVideoUrl && clipto.audioUrl);
+          if (shouldMuxHd && clipto.hdVideoUrl && clipto.audioUrl) {
+            let resolve1080Job: (v: string | null) => void = () => {};
+            const jobPromise = new Promise<string | null>((r) => { resolve1080Job = r; });
+            inFlightYt1080Jobs.set(ytCacheKey, jobPromise);
+
+            const ts = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
             const vTmp = `/tmp/yt_v_${ts}.mp4`;
             const aTmp = `/tmp/yt_a_${ts}.m4a`;
             const outMux = `/tmp/yt_mux_${ts}.mp4`;
-            const [vOk, aOk] = await Promise.all([
-              downloadToTmp(clipto.hdVideoUrl, vTmp),
-              downloadToTmp(clipto.audioUrl, aTmp),
-            ]);
-            let muxOk = false;
-            if (vOk && aOk) {
-              const { exec } = await import('child_process');
-              muxOk = await new Promise<boolean>((resolve) => {
-                exec(
-                  `ffmpeg -y -i "${vTmp}" -i "${aTmp}" -c copy -movflags +faststart "${outMux}"`,
-                  { timeout: 30000 },
-                  (err) => resolve(!err && existsSync(outMux) && statSync(outMux).size > 10000)
-                );
-              });
-            }
-            try { if (existsSync(vTmp)) fs.unlinkSync(vTmp); } catch {}
-            try { if (existsSync(aTmp)) fs.unlinkSync(aTmp); } catch {}
-            if (muxOk) {
-              await saveCachedMediaFile(ytCacheKey, outMux);
-              res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
-              res.setHeader('Content-Type', 'video/mp4');
-              res.setHeader('Content-Length', statSync(outMux).size);
-              res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-              res.setHeader('Access-Control-Allow-Origin', '*');
-              return res.download(outMux, cleanFilename, () => {
+            let muxedPath: string | null = null;
+            let muxIsCached = false;
+
+            try {
+              const [vOk, aOk] = await Promise.all([
+                downloadToTmp(clipto.hdVideoUrl, vTmp),
+                downloadToTmp(clipto.audioUrl, aTmp),
+              ]);
+              let muxOk = false;
+              if (vOk && aOk) {
+                const { exec } = await import('child_process');
+                muxOk = await new Promise<boolean>((resolve) => {
+                  exec(
+                    `ffmpeg -y -i "${vTmp}" -i "${aTmp}" -c copy -movflags +faststart "${outMux}"`,
+                    { timeout: 90000 },
+                    (err) => resolve(!err && existsSync(outMux) && statSync(outMux).size > 10000)
+                  );
+                });
+              }
+              try { if (existsSync(vTmp)) fs.unlinkSync(vTmp); } catch {}
+              try { if (existsSync(aTmp)) fs.unlinkSync(aTmp); } catch {}
+              if (muxOk) {
+                const cachedDest = await saveCachedMediaFile(ytCacheKey, outMux, true);
+                if (cachedDest) {
+                  muxedPath = cachedDest;
+                  muxIsCached = true;
+                } else if (existsSync(outMux)) {
+                  muxedPath = outMux;
+                }
+              } else {
                 try { if (existsSync(outMux)) fs.unlinkSync(outMux); } catch {}
-              });
+              }
+            } finally {
+              inFlightYt1080Jobs.delete(ytCacheKey);
+              resolve1080Job(muxIsCached ? muxedPath : null);
             }
-            try { if (existsSync(outMux)) fs.unlinkSync(outMux); } catch {}
+
+            if (muxedPath && existsSync(muxedPath)) {
+              return sendReadyFile(muxedPath, 'video/mp4', !muxIsCached);
+            }
           }
           const directFallback = clipto.muxedMp4Url || clipto.hdVideoUrl;
           if (directFallback) {
-            const directResp = await fetch(directFallback);
+            const fbTmp = `/tmp/yt_fb_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.mp4`;
+            if (await downloadToTmp(directFallback, fbTmp)) {
+              const cachedDest = await saveCachedMediaFile(ytCacheKey, fbTmp, true);
+              if (cachedDest) {
+                return sendReadyFile(cachedDest, 'video/mp4', false);
+              }
+              if (existsSync(fbTmp)) {
+                return sendReadyFile(fbTmp, 'video/mp4', true);
+              }
+            }
+            const directCtrl = new AbortController();
+            const directTimer = setTimeout(() => directCtrl.abort(), 150000);
+            const directResp = await fetch(directFallback, { signal: directCtrl.signal });
+            clearTimeout(directTimer);
             const ct = (directResp.headers.get('content-type') || '').toLowerCase();
             if (directResp.ok && directResp.body && !ct.includes('json') && !ct.includes('html')) {
               res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
@@ -1797,6 +2057,7 @@ app.get('/api/download-trim', async (req: Request, res: Response) => {
   const timestamp = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const tempInput = `/tmp/trim_in_${timestamp}.mp4`;
   const tempOutput = `/tmp/trim_out_${timestamp}.${ext}`;
+  let tempTrimAudio = '';
   const { exec } = await import('child_process');
   const { existsSync, unlinkSync, createWriteStream, statSync } = await import('fs');
   const { pipeline } = await import('stream/promises');
@@ -1805,6 +2066,7 @@ app.get('/api/download-trim', async (req: Request, res: Response) => {
   const cleanup = () => {
     try { if (existsSync(tempInput)) unlinkSync(tempInput); } catch {}
     try { if (existsSync(tempOutput)) unlinkSync(tempOutput); } catch {}
+    try { if (tempTrimAudio && existsSync(tempTrimAudio)) unlinkSync(tempTrimAudio); } catch {}
   };
 
   const sendCachedTrimFile = (filePath: string) => {
@@ -1843,7 +2105,7 @@ app.get('/api/download-trim', async (req: Request, res: Response) => {
     if (activeTrimJob) {
       const readyPath = await Promise.race([
         activeTrimJob,
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 90000)),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 150000)),
       ]).catch(() => null);
       if (readyPath && existsSync(readyPath) && statSync(readyPath).size > 1000) {
         return sendCachedTrimFile(readyPath);
@@ -1877,45 +2139,34 @@ app.get('/api/download-trim', async (req: Request, res: Response) => {
         }
       }
 
-      // Prepare reliable video input for FFmpeg (check shared cache or active background pre-cache!)
+      // Prepare reliable video input for FFmpeg (check shared HD cache or trim-specific source cache)
       let effectiveInput = tempInput;
       let inputReady = false;
+      const trimSrcPath = cacheKey ? `/tmp/snaprill_tsrc_${cacheKey}.mp4` : '';
       const cachedVideo = await waitForCachedOrInFlight(cacheKey);
       if (cachedVideo) {
         effectiveInput = cachedVideo;
+        inputReady = true;
+      } else if (trimSrcPath && existsSync(trimSrcPath) && statSync(trimSrcPath).size > 10000 && (Date.now() - statSync(trimSrcPath).mtimeMs) < 10 * 60 * 1000) {
+        effectiveInput = trimSrcPath;
         inputReady = true;
       }
 
       const downloadToTempInput = async (streamUrl: string, extraHeaders: Record<string, string> = {}, isAudioOnly = false): Promise<boolean> => {
         const attemptFetch = async (target: string): Promise<boolean> => {
-          try {
-            if (!target || !target.startsWith('http')) return false;
-            const fetchHeaders: Record<string, string> = {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              ...extraHeaders,
-            };
-            if (target.includes('instagram')) fetchHeaders['Referer'] = 'https://www.instagram.com/';
-            if (target.includes('tiktok') || target.includes('tikwm')) fetchHeaders['Referer'] = 'https://www.tiktok.com/';
-
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 60000);
-            const dlResp = await fetch(target, { headers: fetchHeaders, redirect: 'follow', signal: controller.signal });
-            clearTimeout(timeout);
-
-            const ct = (dlResp.headers.get('content-type') || '').toLowerCase();
-            if (dlResp.ok && dlResp.body && !ct.includes('image') && !ct.includes('text') && !ct.includes('json') && !ct.includes('html')) {
-              const fileStream = createWriteStream(tempInput);
-              await pipeline(Readable.fromWeb(dlResp.body as any), fileStream);
-              if (existsSync(tempInput) && statSync(tempInput).size > 10000) {
-                effectiveInput = tempInput;
-                if (!isAudioOnly && !ct.includes('audio/')) {
-                  await saveCachedMediaFile(cacheKey, tempInput);
-                }
-                return true;
+          if (await downloadUrlToFile(target, tempInput, 150000, extraHeaders, 10000)) {
+            effectiveInput = tempInput;
+            if (!isAudioOnly) {
+              if (ytIdParam && trimSrcPath) {
+                try {
+                  fs.copyFileSync(tempInput, trimSrcPath);
+                  pruneSnaprillTmp(180 * 1024 * 1024, 15 * 60 * 1000, trimSrcPath);
+                } catch {}
+              } else {
+                await saveCachedMediaFile(cacheKey, tempInput);
               }
             }
-          } catch (dlErr) {
-            console.warn('Direct stream download error:', dlErr);
+            return true;
           }
           return false;
         };
@@ -1976,11 +2227,21 @@ app.get('/api/download-trim', async (req: Request, res: Response) => {
         try {
           const clipto = await extractYouTubeWithClipto(ytIdParam);
           if (clipto) {
-            const ytCliptoUrl = (ext === 'mp3' && clipto.audioUrl)
-              ? clipto.audioUrl
-              : (clipto.muxedMp4Url || clipto.hdVideoUrl || clipto.audioUrl);
-            if (ytCliptoUrl) {
-              inputReady = await downloadToTempInput(ytCliptoUrl);
+            if (ext === 'mp3' && clipto.audioUrl) {
+              inputReady = await downloadToTempInput(clipto.audioUrl, {}, true);
+            } else if (clipto.muxedMp4Url) {
+              inputReady = await downloadToTempInput(clipto.muxedMp4Url);
+            } else if (clipto.hdVideoUrl && clipto.audioUrl) {
+              const vOk = await downloadToTempInput(clipto.hdVideoUrl, {}, true);
+              if (vOk) {
+                const audioDest = `/tmp/trim_aud_${timestamp}.m4a`;
+                if (await fetchFileForCache(clipto.audioUrl, audioDest, 150000)) {
+                  tempTrimAudio = audioDest;
+                }
+                inputReady = true;
+              }
+            } else if (clipto.hdVideoUrl || clipto.audioUrl) {
+              inputReady = await downloadToTempInput((clipto.hdVideoUrl || clipto.audioUrl)!);
             }
           }
         } catch (cliptoTrimErr) {
@@ -2028,7 +2289,7 @@ app.get('/api/download-trim', async (req: Request, res: Response) => {
       const sliceDuration = Math.max(0.5, endTime - startTime);
       const runExec = (cmd: string): Promise<boolean> => {
         return new Promise((resolve) => {
-          exec(cmd, { timeout: 90000 }, (err) => {
+          exec(cmd, { timeout: 150000 }, (err) => {
             if (!err && existsSync(tempOutput) && statSync(tempOutput).size > 1000) {
               resolve(true);
             } else {
@@ -2043,6 +2304,22 @@ app.get('/api/download-trim', async (req: Request, res: Response) => {
         sliceOk = await runExec(`ffmpeg -y -threads 1 -ss ${startTime} -t ${sliceDuration} -i "${effectiveInput}" -vn -c:a libmp3lame -b:a 192k "${tempOutput}"`);
         if (!sliceOk) {
           sliceOk = await runExec(`ffmpeg -y -threads 1 -ss ${startTime} -t ${sliceDuration} -i "${effectiveInput}" -vn -c:a aac "${tempOutput}"`);
+        }
+      } else if (tempTrimAudio && existsSync(tempTrimAudio)) {
+        sliceOk = await runExec(`ffmpeg -y -ss ${startTime} -t ${sliceDuration} -i "${effectiveInput}" -ss ${startTime} -t ${sliceDuration} -i "${tempTrimAudio}" -c:v copy -c:a aac -b:a 128k -avoid_negative_ts make_zero -movflags +faststart "${tempOutput}"`);
+        if (sliceOk) {
+          const validCopy = await new Promise<boolean>((resolve) => {
+            exec(`ffmpeg -hide_banner -i "${tempOutput}"`, { timeout: 5000 }, (_e, _out, stderr) => {
+              resolve((stderr || '').includes('Video:'));
+            });
+          });
+          if (!validCopy || statSync(tempOutput).size < 15000) {
+            try { if (existsSync(tempOutput)) unlinkSync(tempOutput); } catch {}
+            sliceOk = false;
+          }
+        }
+        if (!sliceOk) {
+          sliceOk = await runExec(`ffmpeg -y -threads 1 -ss ${startTime} -t ${sliceDuration} -i "${effectiveInput}" -ss ${startTime} -t ${sliceDuration} -i "${tempTrimAudio}" -c:v libx264 -preset ultrafast -crf 24 -c:a aac -b:a 128k -movflags +faststart "${tempOutput}"`);
         }
       } else {
         // Ultra-fast stream copy first (~0.2s–0.5s, near-zero RAM) instead of slow full 1080p re-encoding
@@ -2069,19 +2346,11 @@ app.get('/api/download-trim', async (req: Request, res: Response) => {
       if (sliceOk && existsSync(tempOutput)) {
         try {
           fs.copyFileSync(tempOutput, cachedTrimPath);
-          for (const f of fs.readdirSync('/tmp')) {
-            if (f.startsWith('snaprill_trim_')) {
-              const fp = `/tmp/${f}`;
-              try {
-                if (Date.now() - statSync(fp).mtimeMs > 15 * 60 * 1000) {
-                  fs.unlinkSync(fp);
-                }
-              } catch {}
-            }
-          }
+          pruneSnaprillTmp(180 * 1024 * 1024, 15 * 60 * 1000, cachedTrimPath);
           finishTrimJob(cachedTrimPath);
           try { if (existsSync(tempInput)) unlinkSync(tempInput); } catch {}
           try { if (existsSync(tempOutput)) unlinkSync(tempOutput); } catch {}
+          try { if (tempTrimAudio && existsSync(tempTrimAudio)) unlinkSync(tempTrimAudio); } catch {}
           return sendCachedTrimFile(cachedTrimPath);
         } catch {
           finishTrimJob(null);
@@ -2517,9 +2786,11 @@ async function startServer() {
     console.log('📦 Production static assets mounted');
   }
 
-  app.listen(Number(PORT), '0.0.0.0', () => {
+  const server = app.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`🚀 OmniReel Server running on port ${PORT} (0.0.0.0)`);
   });
+  server.requestTimeout = 300000;
+  server.setTimeout(300000);
 }
 
 startServer().catch((err) => {
