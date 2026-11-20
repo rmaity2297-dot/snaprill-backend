@@ -506,70 +506,97 @@ async function downloadUrlToFile(
       ...extraHeaders,
     };
 
-    // YouTube / vidsnap streams throttle or drop non-range single GETs; 1 MB Range chunks complete reliably
+    // YouTube / vidsnap streams throttle or drop non-range single GETs; 1 MB Range chunks with 3x batch concurrency complete much faster
     if (url.includes('googlevideo.com') || url.includes('api.vidsnap.app/proxy')) {
       const deadline = Date.now() + timeoutMs;
       const chunkSize = 1024 * 1024;
       let offset = 0;
       let total: number | null = null;
-      let emptyRetries = 0;
-      let chunk0Retries = 0;
       fs.writeFileSync(destPath, Buffer.alloc(0));
 
-      while ((total === null || offset < total) && Date.now() < deadline) {
-        const end = total !== null ? Math.min(offset + chunkSize - 1, total - 1) : (offset + chunkSize - 1);
-        const ctrl = new AbortController();
-        const chunkWait = Math.min(20000, Math.max(5000, deadline - Date.now()));
-        const timer = setTimeout(() => ctrl.abort(), chunkWait);
-        try {
-          const resp = await fetch(url, {
-            headers: { ...baseHeaders, Range: `bytes=${offset}-${end}` },
-            redirect: 'follow',
-            signal: ctrl.signal,
-          });
-          const ct = (resp.headers.get('content-type') || '').toLowerCase();
-          if (!resp.ok || ct.includes('json') || ct.includes('html') || ct.includes('image')) {
-            try { await resp.body?.cancel(); } catch {}
-            if (offset === 0) {
-              if (++chunk0Retries <= 4) {
-                await new Promise((r) => setTimeout(r, 150));
-                continue;
-              }
+      const fetchRangeChunk = async (
+        rangeStart: number,
+        rangeEnd: number,
+        maxRetries: number
+      ): Promise<{ status: number; buf: Buffer; contentRange: string } | null> => {
+        for (let attempt = 0; attempt <= maxRetries && Date.now() < deadline; attempt++) {
+          const ctrl = new AbortController();
+          const chunkWait = Math.min(20000, Math.max(5000, deadline - Date.now()));
+          const timer = setTimeout(() => ctrl.abort(), chunkWait);
+          try {
+            const resp = await fetch(url, {
+              headers: { ...baseHeaders, Range: `bytes=${rangeStart}-${rangeEnd}` },
+              redirect: 'follow',
+              signal: ctrl.signal,
+            });
+            const ct = (resp.headers.get('content-type') || '').toLowerCase();
+            if (!resp.ok || ct.includes('json') || ct.includes('html') || ct.includes('image')) {
+              try { await resp.body?.cancel(); } catch {}
+              await new Promise((r) => setTimeout(r, 150));
+              continue;
+            }
+            const buf = Buffer.from(await resp.arrayBuffer());
+            if (buf.length === 0) {
+              await new Promise((r) => setTimeout(r, 150));
+              continue;
+            }
+            return {
+              status: resp.status,
+              buf,
+              contentRange: resp.headers.get('content-range') || '',
+            };
+          } catch {
+            await new Promise((r) => setTimeout(r, 150));
+          } finally {
+            clearTimeout(timer);
+          }
+        }
+        return null;
+      };
+
+      const firstChunk = await fetchRangeChunk(0, chunkSize - 1, 4);
+      if (!firstChunk) {
+        try { if (existsSync(destPath)) fs.unlinkSync(destPath); } catch {}
+        return false;
+      }
+
+      if (firstChunk.status === 200) {
+        fs.writeFileSync(destPath, firstChunk.buf);
+        return existsSync(destPath) && statSync(destPath).size >= minBytes;
+      }
+
+      const m0 = firstChunk.contentRange.match(/\/(\d+)$/);
+      if (m0) total = parseInt(m0[1], 10);
+      fs.appendFileSync(destPath, firstChunk.buf);
+      offset += firstChunk.buf.length;
+
+      if (total !== null && offset < total) {
+        const ranges: [number, number][] = [];
+        for (let cur = offset; cur < total; cur += chunkSize) {
+          ranges.push([cur, Math.min(cur + chunkSize - 1, total - 1)]);
+        }
+        for (let i = 0; i < ranges.length && Date.now() < deadline; i += 3) {
+          const batch = ranges.slice(i, i + 3);
+          const results = await Promise.all(batch.map(([s, e]) => fetchRangeChunk(s, e, 4)));
+          for (const resChunk of results) {
+            if (!resChunk) {
               try { if (existsSync(destPath)) fs.unlinkSync(destPath); } catch {}
               return false;
             }
-            if (++emptyRetries > 4) break;
-            await new Promise((r) => setTimeout(r, 150));
-            continue;
+            fs.appendFileSync(destPath, resChunk.buf);
+            offset += resChunk.buf.length;
           }
-          if (resp.status === 200) {
-            const ab = await resp.arrayBuffer();
-            fs.writeFileSync(destPath, Buffer.from(ab));
-            return existsSync(destPath) && statSync(destPath).size >= minBytes;
-          }
-          const cr = resp.headers.get('content-range') || '';
-          const m = cr.match(/\/(\d+)$/);
-          if (m) total = parseInt(m[1], 10);
-          const buf = Buffer.from(await resp.arrayBuffer());
-          if (buf.length === 0) {
-            if (++emptyRetries > 4) break;
-            await new Promise((r) => setTimeout(r, 150));
-            continue;
-          }
-          emptyRetries = 0;
-          fs.appendFileSync(destPath, buf);
-          offset += buf.length;
-          if (total === null && buf.length < chunkSize) break;
-        } catch {
-          if (++emptyRetries > 4) {
-            try { if (existsSync(destPath)) fs.unlinkSync(destPath); } catch {}
-            return false;
-          }
-          await new Promise((r) => setTimeout(r, 150));
-        } finally {
-          clearTimeout(timer);
+        }
+      } else if (total === null && firstChunk.buf.length === chunkSize) {
+        while (Date.now() < deadline) {
+          const nextChunk = await fetchRangeChunk(offset, offset + chunkSize - 1, 4);
+          if (!nextChunk) break;
+          fs.appendFileSync(destPath, nextChunk.buf);
+          offset += nextChunk.buf.length;
+          if (nextChunk.buf.length < chunkSize) break;
         }
       }
+
       const ok = existsSync(destPath) && statSync(destPath).size >= minBytes && (total === null || offset >= total);
       if (!ok) {
         try { if (existsSync(destPath)) fs.unlinkSync(destPath); } catch {}
