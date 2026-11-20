@@ -1454,8 +1454,12 @@
       const toastText = document.getElementById('downloadToastText');
       const saveBtn = document.getElementById('downloadToastSaveBtn');
 
-      // 1. INSTANT NOTIFICATION FEEDBACK AT 0 MILLISECOND:
+      // 1. INSTANT PERSISTENT NOTIFICATION FEEDBACK AT 0 MILLISECOND:
       clearTimeout(downloadToastTimeout);
+      if (window._activeDownloadBlobUrl) {
+        try { URL.revokeObjectURL(window._activeDownloadBlobUrl); } catch {}
+        window._activeDownloadBlobUrl = null;
+      }
       if (saveBtn) {
         saveBtn.classList.add('hidden');
         saveBtn.setAttribute('href', '#');
@@ -1463,7 +1467,9 @@
         saveBtn.setAttribute('download', '');
         saveBtn.onclick = null;
       }
-      toastText.textContent = i18n[currentLang].toastDownload;
+      toastText.textContent = currentLang === 'bn'
+        ? `⏳ ডাউনলোড হচ্ছে... ফাইল প্রস্তুত না হওয়া পর্যন্ত অপেক্ষা করুন (${filename})`
+        : `⏳ Downloading... Preparing your file (${filename})`;
       toast.classList.remove('hidden');
 
       if (window.confetti) {
@@ -1539,8 +1545,8 @@
             saveBtn.classList.remove('hidden');
           }
           toastText.textContent = currentLang === 'bn'
-            ? `✅ ফাইল তৈরি! ডাউনলোড শুরু না হলে "সেভ করুন" বাটনে ট্যাপ করুন: ${filename}`
-            : `✅ File ready! Tap "Save File" if download didn't start automatically.`;
+            ? `📥 ডাউনলোড চলছে! সম্পূর্ণ না হলে বা সেভ করতে "সেভ করুন" বাটনে ট্যাপ করুন: ${filename}`
+            : `📥 Downloading! Keep this open or tap "Save File" if download didn't start: ${filename}`;
 
           const a = document.createElement('a');
           a.href = androidDlUrl;
@@ -1554,18 +1560,49 @@
           }, 1000);
 
           clearTimeout(downloadToastTimeout);
-          downloadToastTimeout = setTimeout(() => {
-            toast.classList.add('hidden');
-            if (saveBtn) saveBtn.classList.add('hidden');
-          }, 25000);
           return;
         }
 
-        // Convert verified stream directly to Blob on Desktop so Chrome never gets "Site wasn't available" or "Resume"!
-        const blob = await resp.blob();
+        // Stream verified response with live progress into Blob on Desktop so toast stays visibly updating until 100% done!
+        const totalBytes = parseInt(resp.headers.get('content-length') || '0', 10) || 0;
+        let blob;
+        if (resp.body && typeof resp.body.getReader === 'function') {
+          const reader = resp.body.getReader();
+          const chunks = [];
+          let receivedBytes = 0;
+          let lastUiUpdate = 0;
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (value) {
+              chunks.push(value);
+              receivedBytes += value.byteLength;
+              const now = Date.now();
+              if (now - lastUiUpdate >= 250) {
+                lastUiUpdate = now;
+                const gotMb = (receivedBytes / (1024 * 1024)).toFixed(1);
+                if (totalBytes > 0) {
+                  const pct = Math.min(99, Math.round((receivedBytes / totalBytes) * 100));
+                  const totMb = (totalBytes / (1024 * 1024)).toFixed(1);
+                  toastText.textContent = currentLang === 'bn'
+                    ? `⏳ ডাউনলোড হচ্ছে... ${pct}% (${gotMb} MB / ${totMb} MB) — ${filename}`
+                    : `⏳ Downloading... ${pct}% (${gotMb} MB / ${totMb} MB) — ${filename}`;
+                } else {
+                  toastText.textContent = currentLang === 'bn'
+                    ? `⏳ ডাউনলোড হচ্ছে... (${gotMb} MB) — ${filename}`
+                    : `⏳ Downloading... (${gotMb} MB) — ${filename}`;
+                }
+              }
+            }
+          }
+          blob = new Blob(chunks, { type: ct || 'application/octet-stream' });
+        } else {
+          blob = await resp.blob();
+        }
         const blobUrl = URL.createObjectURL(blob);
+        window._activeDownloadBlobUrl = blobUrl;
 
-        // Expose direct tap-to-save fallback inside toast
+        // Expose direct tap-to-save fallback inside toast (remains visible until user closes or starts next download)
         if (saveBtn) {
           saveBtn.removeAttribute('target');
           saveBtn.onclick = null;
@@ -1575,8 +1612,8 @@
           saveBtn.classList.remove('hidden');
         }
         toastText.textContent = currentLang === 'bn'
-          ? `✅ ফাইল তৈরি! ডাউনলোড শুরু না হলে "সেভ করুন" বাটনে ট্যাপ করুন: ${filename}`
-          : `✅ File ready! Tap "Save File" if download didn't start automatically.`;
+          ? `✅ ডাউনলোড সম্পন্ন হয়েছে! ফাইল সেভ হচ্ছে — প্রয়োজনে "সেভ করুন" চাপুন: ${filename}`
+          : `✅ Download complete! Tap "Save File" if save didn't start automatically.`;
 
         const a = document.createElement('a');
         a.href = blobUrl;
@@ -1590,14 +1627,6 @@
         }, 1000);
 
         clearTimeout(downloadToastTimeout);
-        downloadToastTimeout = setTimeout(() => {
-          toast.classList.add('hidden');
-          if (saveBtn) saveBtn.classList.add('hidden');
-        }, 20000);
-
-        setTimeout(() => {
-          URL.revokeObjectURL(blobUrl);
-        }, 120000);
 
       } catch (e) {
         console.warn('Blob download fetch error, attempting safe endpoint anchor:', e);
@@ -1630,8 +1659,8 @@
           saveBtn.classList.remove('hidden');
         }
         toastText.textContent = currentLang === 'bn'
-          ? `✅ ডাউনলোড শুরু না হলে "সেভ করুন" বাটনে ট্যাপ করুন: ${filename}`
-          : `✅ Tap "Save File" if download didn't start automatically.`;
+          ? `📥 ডাউনলোড শুরু না হলে "সেভ করুন" বাটনে ট্যাপ করুন: ${filename}`
+          : `📥 Tap "Save File" if download didn't start automatically: ${filename}`;
         toast.classList.remove('hidden');
 
         const a = document.createElement('a');
@@ -1646,10 +1675,6 @@
         }, 1000);
 
         clearTimeout(downloadToastTimeout);
-        downloadToastTimeout = setTimeout(() => {
-          toast.classList.add('hidden');
-          if (saveBtn) saveBtn.classList.add('hidden');
-        }, 25000);
       }
     }
 
