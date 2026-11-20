@@ -439,6 +439,7 @@
                     </svg>
                   </div>
                 </button>
+                <div id="previewNoticeBadge" class="hidden absolute top-2.5 left-2.5 right-2.5 px-2.5 py-1.5 rounded-lg bg-slate-950/90 border border-amber-500/40 text-[11px] text-amber-200 text-center pointer-events-none"></div>
                 <span id="previewDurationBadge" class="absolute bottom-2.5 right-2.5 px-2 py-0.5 rounded bg-black/80 text-[11px] font-mono text-white pointer-events-none">00:15</span>
               </div>
             </div>
@@ -538,9 +539,13 @@
           <div class="space-y-4">
             <!-- Start Time Slider -->
             <div>
-              <div class="flex justify-between text-xs text-slate-400 mb-1">
-                <span>Start Time: <strong id="startTimeDisplay" class="text-white font-mono">0s</strong></span>
-                <span class="text-[11px] text-slate-500">Drag to set start point</span>
+              <div class="flex items-center justify-between text-xs text-slate-400 mb-1.5 gap-2">
+                <div class="flex items-center gap-1.5">
+                  <span>Start Time: <strong id="startTimeDisplay" class="text-white font-mono">0s</strong></span>
+                  <button type="button" onclick="nudgeTrimSlider('start', -0.1)" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-mono text-slate-300 border border-slate-700">-0.1s</button>
+                  <button type="button" onclick="nudgeTrimSlider('start', 0.1)" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-mono text-slate-300 border border-slate-700">+0.1s</button>
+                </div>
+                <span class="text-[11px] text-slate-500 hidden sm:inline">Drag to set start point</span>
               </div>
               <input
                 id="trimStartSlider"
@@ -548,7 +553,7 @@
                 min="0"
                 max="600"
                 value="0"
-                step="0.5"
+                step="0.1"
                 class="w-full h-2 bg-slate-800 rounded-lg cursor-pointer"
                 oninput="onTrimSliderChange('start')"
               />
@@ -556,9 +561,13 @@
 
             <!-- End Time Slider -->
             <div>
-              <div class="flex justify-between text-xs text-slate-400 mb-1">
-                <span>End Time: <strong id="endTimeDisplay" class="text-white font-mono">0s</strong></span>
-                <span class="text-[11px] text-slate-500">Max: <strong id="trimTotalDurationDisplay" class="text-slate-300 font-mono">--</strong> • Drag to set end point</span>
+              <div class="flex items-center justify-between text-xs text-slate-400 mb-1.5 gap-2">
+                <div class="flex items-center gap-1.5">
+                  <span>End Time: <strong id="endTimeDisplay" class="text-white font-mono">0s</strong></span>
+                  <button type="button" onclick="nudgeTrimSlider('end', -0.1)" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-mono text-slate-300 border border-slate-700">-0.1s</button>
+                  <button type="button" onclick="nudgeTrimSlider('end', 0.1)" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-mono text-slate-300 border border-slate-700">+0.1s</button>
+                </div>
+                <span class="text-[11px] text-slate-500">Max: <strong id="trimTotalDurationDisplay" class="text-slate-300 font-mono">--</strong></span>
               </div>
               <input
                 id="trimEndSlider"
@@ -566,7 +575,7 @@
                 min="0"
                 max="600"
                 value="0"
-                step="0.5"
+                step="0.1"
                 class="w-full h-2 bg-slate-800 rounded-lg cursor-pointer"
                 oninput="onTrimSliderChange('end')"
               />
@@ -1099,6 +1108,11 @@
       const thumbImg = document.getElementById('previewThumbnailImg');
       const playOverlay = document.getElementById('playOverlayBtn');
 
+      const previewNotice = document.getElementById('previewNoticeBadge');
+      if (previewNotice) {
+        previewNotice.classList.add('hidden');
+        previewNotice.textContent = '';
+      }
       thumbImg.src = item.coverUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80';
       thumbImg.classList.remove('hidden');
       videoPlayer.classList.add('hidden');
@@ -1136,7 +1150,7 @@
 
       window.updateDurationUI = function(sec) {
         if (!sec || isNaN(sec) || sec <= 0) return;
-        const exactMax = Math.max(1, Math.round(sec * 2) / 2);
+        const exactMax = Math.max(1, Math.round(sec * 10) / 10);
         const formatted = window.formatVideoDuration(sec);
         if (durBadge) durBadge.textContent = formatted;
         if (trimTotalEl) trimTotalEl.textContent = `${formatted} (${exactMax}s)`;
@@ -1149,7 +1163,7 @@
             onTrimSliderChange('reset');
           } else {
             if (parseFloat(endSlider.value) > exactMax) endSlider.value = exactMax;
-            if (parseFloat(startSlider.value) > exactMax) startSlider.value = Math.max(0, exactMax - 0.5);
+            if (parseFloat(startSlider.value) > exactMax) startSlider.value = Math.max(0, Math.round((exactMax - 0.1) * 10) / 10);
             onTrimSliderChange('sync');
           }
         }
@@ -1167,6 +1181,7 @@
       if (!initialDur && item.duration && typeof item.duration === 'number' && item.duration > 0) {
         initialDur = item.duration;
       }
+      const authoritativeServerDur = initialDur;
 
       if (initialDur > 0) {
         window.updateDurationUI(initialDur);
@@ -1180,15 +1195,16 @@
         onTrimSliderChange('reset');
       }
 
-      // 2. Real-time HTML5 video metadata listener for exact file duration
+      // 2. Real-time HTML5 video metadata listener (never let truncated proxy metadata shrink a valid server duration)
       videoPlayer.onloadedmetadata = function() {
         if (videoPlayer.duration && !isNaN(videoPlayer.duration) && isFinite(videoPlayer.duration) && videoPlayer.duration > 0) {
+          if (authoritativeServerDur > 0 && videoPlayer.duration < authoritativeServerDur * 0.5) return;
           window.updateDurationUI(videoPlayer.duration);
         }
       };
 
-      // 3. Silently probe direct media stream in background to resolve exact duration immediately
-      if (streamUrl && streamUrl.startsWith('http')) {
+      // 3. Silently probe direct media stream in background only when YouTube/server duration isn't already known
+      if (streamUrl && streamUrl.startsWith('http') && !(item.platform === 'youtube' && authoritativeServerDur > 0)) {
         try {
           const probe = document.createElement('video');
           probe.preload = 'metadata';
@@ -1197,6 +1213,7 @@
             : streamUrl;
           probe.onloadedmetadata = function() {
             if (probe.duration && !isNaN(probe.duration) && isFinite(probe.duration) && probe.duration > 0) {
+              if (authoritativeServerDur > 0 && probe.duration < authoritativeServerDur * 0.5) return;
               window.updateDurationUI(probe.duration);
             }
           };
@@ -1213,6 +1230,68 @@
       document.getElementById('resultsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
+    function handleYoutubeEmbedErrorFallback() {
+      if (!currentVideoData || currentVideoData.platform !== 'youtube') return;
+      currentVideoData._ytEmbedBlocked = true;
+      const videoPlayer = document.getElementById('previewVideoPlayer');
+      const iframePlayer = document.getElementById('previewIframePlayer');
+      const thumbImg = document.getElementById('previewThumbnailImg');
+      const playOverlay = document.getElementById('playOverlayBtn');
+      const previewNotice = document.getElementById('previewNoticeBadge');
+
+      if (iframePlayer) {
+        iframePlayer.src = '';
+        iframePlayer.classList.add('hidden');
+      }
+
+      const fallbackStream = (currentVideoData.videoUrl && currentVideoData.videoUrl.startsWith('http') && !currentVideoData.videoUrl.includes('ytimg.com'))
+        ? currentVideoData.videoUrl
+        : '';
+
+      if (fallbackStream) {
+        videoPlayer.onerror = () => {
+          videoPlayer.classList.add('hidden');
+          thumbImg.classList.remove('hidden');
+          playOverlay.classList.remove('hidden');
+          if (previewNotice) {
+            previewNotice.textContent = currentLang === 'bn'
+              ? '⚠️ মালিক বাইরের প্লেব্যাক বন্ধ রেখেছেন — তবে নিচ থেকে ডাউনলোড ও ট্রিম স্বাভাবিকভাবেই কাজ করবে।'
+              : '⚠️ Playback disabled on external sites by owner — Download & Trim still work below.';
+            previewNotice.classList.remove('hidden');
+          }
+        };
+        videoPlayer.src = `${API_BASE}/api/proxy-stream?url=${encodeURIComponent(fallbackStream)}`;
+        thumbImg.classList.add('hidden');
+        playOverlay.classList.add('hidden');
+        videoPlayer.classList.remove('hidden');
+        videoPlayer.play().catch(() => {});
+      } else {
+        thumbImg.classList.remove('hidden');
+        playOverlay.classList.remove('hidden');
+        if (previewNotice) {
+          previewNotice.textContent = currentLang === 'bn'
+            ? '⚠️ মালিক বাইরের প্লেব্যাক বন্ধ রেখেছেন — তবে নিচ থেকে ডাউনলোড ও ট্রিম স্বাভাবিকভাবেই কাজ করবে।'
+            : '⚠️ Playback disabled on external sites by owner — Download & Trim still work below.';
+          previewNotice.classList.remove('hidden');
+        }
+      }
+    }
+
+    // Listen for YouTube embed error events (101 / 150 = owner disabled embed playback on other websites)
+    window.addEventListener('message', (event) => {
+      try {
+        if (!event.origin || !event.origin.includes('youtube')) return;
+        const payload = typeof event.data === 'string' ? JSON.parse(event.data) : event.data;
+        if (!payload) return;
+        const errCode = payload.event === 'onError'
+          ? payload.info
+          : (payload.info && typeof payload.info.errorCode === 'number' ? payload.info.errorCode : null);
+        if (errCode === 101 || errCode === 150 || errCode === 100 || errCode === 5) {
+          handleYoutubeEmbedErrorFallback();
+        }
+      } catch {}
+    });
+
     // Interactive Video Preview (Plays from beginning till end, stops/pauses on click)
     function toggleVideoPlayback() {
       if (!currentVideoData) return;
@@ -1221,8 +1300,8 @@
       const thumbImg = document.getElementById('previewThumbnailImg');
       const playOverlay = document.getElementById('playOverlayBtn');
 
-      // 1. YouTube Video Preview (iframe player):
-      if (currentVideoData.platform === 'youtube' && currentVideoData.id) {
+      // 1. YouTube Video Preview (iframe player, with automatic HTML5 fallback if embed disabled):
+      if (currentVideoData.platform === 'youtube' && currentVideoData.id && !currentVideoData._ytEmbedBlocked) {
         if (!iframePlayer.classList.contains('hidden')) {
           // If playing, clicking stops/pauses it
           iframePlayer.src = '';
@@ -1230,8 +1309,16 @@
           thumbImg.classList.remove('hidden');
           playOverlay.classList.remove('hidden');
         } else {
+          const originParam = (window.location.origin && window.location.origin.startsWith('http'))
+            ? `&origin=${encodeURIComponent(window.location.origin)}`
+            : '';
+          iframePlayer.onload = () => {
+            try {
+              iframePlayer.contentWindow?.postMessage('{"event":"listening","id":1}', '*');
+            } catch {}
+          };
           // Start playing YouTube video till the end
-          iframePlayer.src = `https://www.youtube-nocookie.com/embed/${currentVideoData.id}?autoplay=1&rel=0&modestbranding=1&enablejsapi=1`;
+          iframePlayer.src = `https://www.youtube-nocookie.com/embed/${currentVideoData.id}?autoplay=1&rel=0&modestbranding=1&enablejsapi=1${originParam}`;
           thumbImg.classList.add('hidden');
           playOverlay.classList.add('hidden');
           videoPlayer.classList.add('hidden');
@@ -1240,9 +1327,9 @@
         return;
       }
 
-      // 2. Direct MP4 (Instagram Reels, TikTok, Facebook Watch, Uploaded assets):
+      // 2. Direct MP4 (Instagram Reels, TikTok, Facebook Watch, Uploaded assets, or YouTube fallback):
       const streamUrl = currentVideoData.videoUrl || currentVideoData.audioUrl;
-      if (streamUrl) {
+      if (streamUrl && !streamUrl.includes('ytimg.com')) {
         if (!videoPlayer.classList.contains('hidden')) {
           // Toggle play / pause on click
           if (videoPlayer.paused) {
@@ -1278,6 +1365,14 @@
           videoPlayer.onended = () => {
             playOverlay.classList.remove('hidden');
           };
+        }
+      } else if (currentVideoData._ytEmbedBlocked) {
+        const previewNotice = document.getElementById('previewNoticeBadge');
+        if (previewNotice) {
+          previewNotice.textContent = currentLang === 'bn'
+            ? '⚠️ মালিক বাইরের প্লেব্যাক বন্ধ রেখেছেন — তবে নিচ থেকে ডাউনলোড ও ট্রিম স্বাভাবিকভাবেই কাজ করবে।'
+            : '⚠️ Playback disabled on external sites by owner — Download & Trim still work below.';
+          previewNotice.classList.remove('hidden');
         }
       }
     }
@@ -1560,12 +1655,25 @@
 
     function formatTrimLabel(sec) {
       if (!sec || isNaN(sec) || sec <= 0) return '0s';
-      if (sec >= 60) {
-        const m = Math.floor(sec / 60);
-        const s = Math.round((sec % 60) * 10) / 10;
+      const rounded = Math.round(sec * 10) / 10;
+      if (rounded >= 60) {
+        const m = Math.floor(rounded / 60);
+        const s = Math.round((rounded % 60) * 10) / 10;
         return `${m}m ${s}s`;
       }
-      return `${sec}s`;
+      return `${rounded}s`;
+    }
+
+    function nudgeTrimSlider(target, delta) {
+      const sliderId = target === 'start' ? 'trimStartSlider' : 'trimEndSlider';
+      const slider = document.getElementById(sliderId);
+      if (!slider) return;
+      const minVal = parseFloat(slider.min) || 0;
+      const maxVal = parseFloat(slider.max) || 600;
+      const current = parseFloat(slider.value) || 0;
+      const next = Math.min(maxVal, Math.max(minVal, Math.round((current + delta) * 10) / 10));
+      slider.value = next;
+      onTrimSliderChange(target);
     }
 
     // Slider range update
@@ -1575,14 +1683,14 @@
       }
       const startSlider = document.getElementById('trimStartSlider');
       const endSlider = document.getElementById('trimEndSlider');
-      let startVal = parseFloat(startSlider.value) || 0;
-      let endVal = parseFloat(endSlider.value) || 0;
+      let startVal = Math.round((parseFloat(startSlider.value) || 0) * 10) / 10;
+      let endVal = Math.round((parseFloat(endSlider.value) || 0) * 10) / 10;
 
       if (source === 'start' && startVal > endVal) {
         endVal = startVal;
         endSlider.value = endVal;
       } else if (source === 'end' && endVal < startVal) {
-        startVal = Math.max(0, endVal - 0.5);
+        startVal = Math.max(0, Math.round((endVal - 0.1) * 10) / 10);
         startSlider.value = startVal;
       } else if (startVal > endVal) {
         startVal = endVal;
