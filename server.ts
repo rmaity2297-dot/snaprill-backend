@@ -206,7 +206,7 @@ async function ensureAccessibleYouTubeUrl(url?: string): Promise<string | undefi
 
   if (url.includes('googlevideo.com') && !url.includes('api.vidsnap.app/proxy')) {
     const proxied = `https://api.vidsnap.app/proxy?u=${encodeURIComponent(url)}`;
-    if (await probe(proxied, 8000)) {
+    if (await probe(proxied, 6000) || await probe(proxied, 6000)) {
       return proxied;
     }
   }
@@ -224,6 +224,7 @@ const cliptoMetaCache = new Map<string, {
     muxedMp4Url?: string;
     hdVideoUrl?: string;
     audioUrl?: string;
+    fallbackAudioUrl?: string;
   };
   expiresAt: number;
 }>();
@@ -237,6 +238,7 @@ async function extractYouTubeWithClipto(ytId: string, forceRefresh = false): Pro
   muxedMp4Url?: string;
   hdVideoUrl?: string;
   audioUrl?: string;
+  fallbackAudioUrl?: string;
 } | null> {
   if (!forceRefresh) {
     const cached = cliptoMetaCache.get(ytId);
@@ -253,6 +255,7 @@ async function extractYouTubeWithClipto(ytId: string, forceRefresh = false): Pro
     muxedMp4Url?: string;
     hdVideoUrl?: string;
     audioUrl?: string;
+    fallbackAudioUrl?: string;
   } | null = null;
 
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -299,14 +302,23 @@ async function extractYouTubeWithClipto(ytId: string, forceRefresh = false): Pro
           return (b.bitrate || 0) - (a.bitrate || 0);
         });
 
-      const rawMuxed = muxedList[0]?.url;
-      const rawHd = hdList[0]?.url || fallbackVideoList[0]?.url;
-      const rawAudio = audioList[0]?.url;
+      const pickAccessible = async (urls: (string | undefined)[]): Promise<string | undefined> => {
+        for (const u of urls) {
+          if (!u) continue;
+          const ok = await ensureAccessibleYouTubeUrl(u);
+          if (ok) return ok;
+        }
+        return undefined;
+      };
+      const muxedCandidates = muxedList.slice(0, 2).map((m) => m?.url);
+      const hdCandidates = [...hdList.slice(0, 2), ...fallbackVideoList.slice(0, 2)].map((m) => m?.url);
+      const audioCandidates = audioList.slice(0, 3).map((m) => m?.url);
 
-      const [muxedMp4Url, hdVideoUrl, audioUrl] = await Promise.all([
-        ensureAccessibleYouTubeUrl(rawMuxed),
-        ensureAccessibleYouTubeUrl(rawHd),
-        ensureAccessibleYouTubeUrl(rawAudio),
+      const [muxedMp4Url, hdVideoUrl, audioUrl, fallbackAudioUrl] = await Promise.all([
+        pickAccessible(muxedCandidates),
+        pickAccessible(hdCandidates),
+        pickAccessible(audioCandidates),
+        audioCandidates[1] ? ensureAccessibleYouTubeUrl(audioCandidates[1]) : Promise.resolve(undefined),
       ]);
 
       const candidate: {
@@ -317,6 +329,7 @@ async function extractYouTubeWithClipto(ytId: string, forceRefresh = false): Pro
         muxedMp4Url?: string;
         hdVideoUrl?: string;
         audioUrl?: string;
+        fallbackAudioUrl?: string;
       } = {
         title: d.title || bestMeta?.title || undefined,
         author: d.author || bestMeta?.author || undefined,
@@ -325,6 +338,7 @@ async function extractYouTubeWithClipto(ytId: string, forceRefresh = false): Pro
         muxedMp4Url: muxedMp4Url || bestMeta?.muxedMp4Url,
         hdVideoUrl: hdVideoUrl || bestMeta?.hdVideoUrl,
         audioUrl: audioUrl || bestMeta?.audioUrl,
+        fallbackAudioUrl: fallbackAudioUrl || bestMeta?.fallbackAudioUrl,
       };
       bestMeta = candidate;
 
@@ -492,19 +506,20 @@ async function downloadUrlToFile(
       ...extraHeaders,
     };
 
-    // YouTube / vidsnap streams throttle or drop non-range single GETs; 1.5 MB Range chunks complete in ~1–3s
+    // YouTube / vidsnap streams throttle or drop non-range single GETs; 1 MB Range chunks complete reliably
     if (url.includes('googlevideo.com') || url.includes('api.vidsnap.app/proxy')) {
       const deadline = Date.now() + timeoutMs;
-      const chunkSize = 1536 * 1024;
+      const chunkSize = 1024 * 1024;
       let offset = 0;
       let total: number | null = null;
       let emptyRetries = 0;
+      let chunk0Retries = 0;
       fs.writeFileSync(destPath, Buffer.alloc(0));
 
       while ((total === null || offset < total) && Date.now() < deadline) {
         const end = total !== null ? Math.min(offset + chunkSize - 1, total - 1) : (offset + chunkSize - 1);
         const ctrl = new AbortController();
-        const chunkWait = Math.min(25000, Math.max(5000, deadline - Date.now()));
+        const chunkWait = Math.min(20000, Math.max(5000, deadline - Date.now()));
         const timer = setTimeout(() => ctrl.abort(), chunkWait);
         try {
           const resp = await fetch(url, {
@@ -516,10 +531,15 @@ async function downloadUrlToFile(
           if (!resp.ok || ct.includes('json') || ct.includes('html') || ct.includes('image')) {
             try { await resp.body?.cancel(); } catch {}
             if (offset === 0) {
+              if (++chunk0Retries <= 4) {
+                await new Promise((r) => setTimeout(r, 150));
+                continue;
+              }
               try { if (existsSync(destPath)) fs.unlinkSync(destPath); } catch {}
               return false;
             }
-            if (++emptyRetries > 2) break;
+            if (++emptyRetries > 4) break;
+            await new Promise((r) => setTimeout(r, 150));
             continue;
           }
           if (resp.status === 200) {
@@ -532,7 +552,8 @@ async function downloadUrlToFile(
           if (m) total = parseInt(m[1], 10);
           const buf = Buffer.from(await resp.arrayBuffer());
           if (buf.length === 0) {
-            if (++emptyRetries > 2) break;
+            if (++emptyRetries > 4) break;
+            await new Promise((r) => setTimeout(r, 150));
             continue;
           }
           emptyRetries = 0;
@@ -540,10 +561,11 @@ async function downloadUrlToFile(
           offset += buf.length;
           if (total === null && buf.length < chunkSize) break;
         } catch {
-          if (++emptyRetries > 2) {
+          if (++emptyRetries > 4) {
             try { if (existsSync(destPath)) fs.unlinkSync(destPath); } catch {}
             return false;
           }
+          await new Promise((r) => setTimeout(r, 150));
         } finally {
           clearTimeout(timer);
         }
@@ -883,37 +905,40 @@ app.all(['/api/resolve', '/api/resolve-video'], async (req: Request, res: Respon
           console.warn('YouTube oembed warning:', e);
         }
 
-        // Fast high-speed stream resolution via btch-downloader (reliable datacenter bypass)
-        try {
-          const { youtube } = await import('btch-downloader');
-          const ytRes: any = await youtube(`https://www.youtube.com/watch?v=${ytId}`);
-          if (ytRes && ytRes.status) {
-            if (ytRes.title) title = ytRes.title;
-            if (ytRes.author) author = ytRes.author;
-            if (ytRes.thumbnail) oembedThumbnail = ytRes.thumbnail;
-            if (ytRes.mp4) directMp4Url = ytRes.mp4;
-            if (ytRes.mp3) directMp3Url = ytRes.mp3;
-            if (ytRes.duration && !isNaN(Number(ytRes.duration))) ytDuration = Math.round(Number(ytRes.duration));
-          }
-        } catch (ytResolveErr) {
-          console.warn('YouTube stream fast resolve warning:', ytResolveErr);
-        }
-
-        // Fallback to Clipto / yt-dlp / YouTube search duration so stream & actual length (40s, 1m, 2m, 5m, 6m) are always accurate
+        // 1. Primary fast & cloud-friendly extraction via Clipto YouTube API (populates stream cache + exact duration 40s, 1m, 5m, 7m)
         let resolvedClipto: { muxedMp4Url?: string; hdVideoUrl?: string; audioUrl?: string } | null = null;
+        try {
+          const cliptoInfo = await extractYouTubeWithClipto(ytId);
+          if (cliptoInfo) {
+            resolvedClipto = cliptoInfo;
+            if (cliptoInfo.title) title = cliptoInfo.title;
+            if (cliptoInfo.author) author = cliptoInfo.author;
+            if (cliptoInfo.thumbnail) oembedThumbnail = cliptoInfo.thumbnail;
+            if (cliptoInfo.duration && !ytDuration) ytDuration = cliptoInfo.duration;
+            if (cliptoInfo.muxedMp4Url && !directMp4Url) directMp4Url = cliptoInfo.muxedMp4Url;
+            if (cliptoInfo.audioUrl && !directMp3Url) directMp3Url = cliptoInfo.audioUrl;
+          }
+        } catch {}
+
+        // 2. Fallback via btch-downloader (bounded to 8s) if Clipto missed stream or duration
         if (!directMp4Url || !ytDuration) {
           try {
-            const cliptoInfo = await extractYouTubeWithClipto(ytId);
-            if (cliptoInfo) {
-              resolvedClipto = cliptoInfo;
-              if (cliptoInfo.title) title = cliptoInfo.title;
-              if (cliptoInfo.author) author = cliptoInfo.author;
-              if (cliptoInfo.thumbnail) oembedThumbnail = cliptoInfo.thumbnail;
-              if (cliptoInfo.duration && !ytDuration) ytDuration = cliptoInfo.duration;
-              if (cliptoInfo.muxedMp4Url && !directMp4Url) directMp4Url = cliptoInfo.muxedMp4Url;
-              if (cliptoInfo.audioUrl && !directMp3Url) directMp3Url = cliptoInfo.audioUrl;
+            const { youtube } = await import('btch-downloader');
+            const ytRes: any = await Promise.race([
+              youtube(`https://www.youtube.com/watch?v=${ytId}`),
+              new Promise((_, reject) => setTimeout(() => reject(new Error('btch timeout')), 8000)),
+            ]);
+            if (ytRes && ytRes.status) {
+              if (ytRes.title) title = ytRes.title;
+              if (ytRes.author) author = ytRes.author;
+              if (ytRes.thumbnail) oembedThumbnail = ytRes.thumbnail;
+              if (ytRes.mp4 && !directMp4Url) directMp4Url = ytRes.mp4;
+              if (ytRes.mp3 && !directMp3Url) directMp3Url = ytRes.mp3;
+              if (ytRes.duration && !ytDuration && !isNaN(Number(ytRes.duration))) ytDuration = Math.round(Number(ytRes.duration));
             }
-          } catch {}
+          } catch (ytResolveErr) {
+            console.warn('YouTube stream fast resolve warning:', ytResolveErr);
+          }
         }
 
         if (!directMp4Url || !ytDuration) {
@@ -1674,38 +1699,7 @@ app.get('/api/download-youtube', async (req: Request, res: Response) => {
       }
     }
 
-    // 1. Try btch-downloader direct authenticated proxy stream (bounded to 8s so long videos fall through to Clipto immediately)
-    try {
-      const { youtube } = await import('btch-downloader');
-      const ytData: any = await Promise.race([
-        youtube(`https://www.youtube.com/watch?v=${ytId}`),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('btch timeout')), 8000)),
-      ]);
-      const directUrl = (ext === 'mp3' && ytData?.mp3) ? ytData.mp3 : (ytData?.mp4 || ytData?.mp3);
-
-      if (directUrl && typeof directUrl === 'string' && directUrl.startsWith('http')) {
-        const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 150000);
-        const streamResp = await fetch(directUrl, { signal: ctrl.signal });
-        clearTimeout(timer);
-        if (streamResp.ok && streamResp.body) {
-          res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
-          res.setHeader('Content-Type', mimeType);
-          res.setHeader('Content-Transfer-Encoding', 'binary');
-          res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-          res.setHeader('Access-Control-Allow-Origin', '*');
-          const cl = streamResp.headers.get('content-length');
-          if (cl) res.setHeader('Content-Length', cl);
-
-          await pipeline(Readable.fromWeb(streamResp.body as any), res);
-          return;
-        }
-      }
-    } catch {
-      // Graceful fallback to secondary extractor
-    }
-
-    // 2. Primary cloud-friendly extractor via Clipto YouTube API (with automatic proxy fallback for IP-locked streams)
+    // 1. Primary cloud-friendly extractor via Clipto YouTube API (supports 1080p/720p H.264 + AAC, cached MP3/MP4 for instant Android re-downloads)
     try {
       const clipto = await extractYouTubeWithClipto(ytId);
       const downloadToTmp = async (url: string, destPath: string): Promise<boolean> => {
@@ -1727,15 +1721,28 @@ app.get('/api/download-youtube', async (req: Request, res: Response) => {
           let mp3IsCached = false;
 
           try {
-            const fetchedIn = await downloadToTmp(srcAudio, inTmp);
-            const ffmpegInput = fetchedIn ? inTmp : srcAudio;
-            const mp3Ok = await new Promise<boolean>((resolve) => {
+            let fetchedIn = await downloadToTmp(srcAudio, inTmp);
+            if (!fetchedIn && clipto.fallbackAudioUrl && clipto.fallbackAudioUrl !== srcAudio) {
+              fetchedIn = await downloadToTmp(clipto.fallbackAudioUrl, inTmp);
+            }
+            if (!fetchedIn && clipto.muxedMp4Url && clipto.muxedMp4Url !== srcAudio) {
+              fetchedIn = await downloadToTmp(clipto.muxedMp4Url, inTmp);
+            }
+            if (!fetchedIn) {
+              const freshClipto = await extractYouTubeWithClipto(ytId, true);
+              const freshAudio = freshClipto?.audioUrl || freshClipto?.fallbackAudioUrl || freshClipto?.muxedMp4Url;
+              if (freshAudio) {
+                fetchedIn = await downloadToTmp(freshAudio, inTmp);
+              }
+            }
+            const ffmpegInput = fetchedIn ? inTmp : ((!srcAudio.includes('googlevideo.com') && !srcAudio.includes('vidsnap.app')) ? srcAudio : '');
+            const mp3Ok = ffmpegInput ? await new Promise<boolean>((resolve) => {
               exec(
                 `ffmpeg -y -threads 1 -i "${ffmpegInput}" -vn -c:a libmp3lame -b:a 192k "${outMp3}"`,
                 { timeout: 120000 },
                 (err) => resolve(!err && existsSync(outMp3) && statSync(outMp3).size > 5000)
               );
-            });
+            }) : false;
             try { if (existsSync(inTmp)) fs.unlinkSync(inTmp); } catch {}
             if (mp3Ok) {
               const cachedDest = `/tmp/snaprill_ytmp3_${cleanYtKey}.mp3`;
@@ -1765,19 +1772,22 @@ app.get('/api/download-youtube', async (req: Request, res: Response) => {
 
           const audioCtrl = new AbortController();
           const audioTimer = setTimeout(() => audioCtrl.abort(), 150000);
-          const audioResp = await fetch(srcAudio, { signal: audioCtrl.signal });
-          clearTimeout(audioTimer);
-          const ct = (audioResp.headers.get('content-type') || '').toLowerCase();
-          if (audioResp.ok && audioResp.body && !ct.includes('json') && !ct.includes('html')) {
-            res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
-            res.setHeader('Content-Type', mimeType);
-            res.setHeader('Content-Transfer-Encoding', 'binary');
-            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-            res.setHeader('Access-Control-Allow-Origin', '*');
-            const cl = audioResp.headers.get('content-length');
-            if (cl) res.setHeader('Content-Length', cl);
-            await pipeline(Readable.fromWeb(audioResp.body as any), res);
-            return;
+          try {
+            const audioResp = await fetch(srcAudio, { signal: audioCtrl.signal });
+            const ct = (audioResp.headers.get('content-type') || '').toLowerCase();
+            if (audioResp.ok && audioResp.body && !ct.includes('json') && !ct.includes('html')) {
+              res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
+              res.setHeader('Content-Type', mimeType);
+              res.setHeader('Content-Transfer-Encoding', 'binary');
+              res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+              res.setHeader('Access-Control-Allow-Origin', '*');
+              const cl = audioResp.headers.get('content-length');
+              if (cl) res.setHeader('Content-Length', cl);
+              await pipeline(Readable.fromWeb(audioResp.body as any), res);
+              return;
+            }
+          } finally {
+            clearTimeout(audioTimer);
           }
         }
         if (ext === 'mp4') {
@@ -1846,25 +1856,62 @@ app.get('/api/download-youtube', async (req: Request, res: Response) => {
             }
             const directCtrl = new AbortController();
             const directTimer = setTimeout(() => directCtrl.abort(), 150000);
-            const directResp = await fetch(directFallback, { signal: directCtrl.signal });
-            clearTimeout(directTimer);
-            const ct = (directResp.headers.get('content-type') || '').toLowerCase();
-            if (directResp.ok && directResp.body && !ct.includes('json') && !ct.includes('html')) {
-              res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
-              res.setHeader('Content-Type', mimeType);
-              res.setHeader('Content-Transfer-Encoding', 'binary');
-              res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-              res.setHeader('Access-Control-Allow-Origin', '*');
-              const cl = directResp.headers.get('content-length');
-              if (cl) res.setHeader('Content-Length', cl);
-              await pipeline(Readable.fromWeb(directResp.body as any), res);
-              return;
+            try {
+              const directResp = await fetch(directFallback, { signal: directCtrl.signal });
+              const ct = (directResp.headers.get('content-type') || '').toLowerCase();
+              if (directResp.ok && directResp.body && !ct.includes('json') && !ct.includes('html')) {
+                res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
+                res.setHeader('Content-Type', mimeType);
+                res.setHeader('Content-Transfer-Encoding', 'binary');
+                res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+                res.setHeader('Access-Control-Allow-Origin', '*');
+                const cl = directResp.headers.get('content-length');
+                if (cl) res.setHeader('Content-Length', cl);
+                await pipeline(Readable.fromWeb(directResp.body as any), res);
+                return;
+              }
+            } finally {
+              clearTimeout(directTimer);
             }
           }
         }
       }
     } catch {
       // Safe fallback
+    }
+
+    // 2. Secondary fallback via btch-downloader (bounded to 8s lookup and timeout-guarded stream)
+    try {
+      const { youtube } = await import('btch-downloader');
+      const ytData: any = await Promise.race([
+        youtube(`https://www.youtube.com/watch?v=${ytId}`),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('btch timeout')), 8000)),
+      ]);
+      const directUrl = (ext === 'mp3' && ytData?.mp3) ? ytData.mp3 : (ytData?.mp4 || ytData?.mp3);
+
+      if (directUrl && typeof directUrl === 'string' && directUrl.startsWith('http')) {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 150000);
+        try {
+          const streamResp = await fetch(directUrl, { signal: ctrl.signal });
+          if (streamResp.ok && streamResp.body) {
+            res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
+            res.setHeader('Content-Type', mimeType);
+            res.setHeader('Content-Transfer-Encoding', 'binary');
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            const cl = streamResp.headers.get('content-length');
+            if (cl) res.setHeader('Content-Length', cl);
+
+            await pipeline(Readable.fromWeb(streamResp.body as any), res);
+            return;
+          }
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+    } catch {
+      // Graceful fallback to tertiary extractor
     }
 
     // 3. Fallback extractor via yt-dlp binary if available
@@ -2043,7 +2090,7 @@ app.get('/api/download-trim', async (req: Request, res: Response) => {
   const origUrlParam = (req.query.origUrl as string || '').trim();
   const ytIdParam = ((req.query.ytId as string) || extractYouTubeId(rawTargetUrl) || extractYouTubeId(origUrlParam) || '').trim();
   const startTime = Math.max(0, parseFloat((req.query.start as string) || '0'));
-  const endTime = Math.max(startTime + 0.5, parseFloat((req.query.end as string) || '0'));
+  const endTime = Math.max(startTime + 0.1, parseFloat((req.query.end as string) || '0'));
   const format = ((req.query.format as string) || 'mp4').toLowerCase();
   const ext = format === 'mp3' ? 'mp3' : 'mp4';
   const mimeType = ext === 'mp3' ? 'audio/mpeg' : 'video/mp4';
@@ -2286,7 +2333,7 @@ app.get('/api/download-trim', async (req: Request, res: Response) => {
       }
 
       // Fast, low-RAM FFmpeg slicing (-threads 1 keeps Render 512MB container well within memory limit)
-      const sliceDuration = Math.max(0.5, endTime - startTime);
+      const sliceDuration = Math.max(0.1, endTime - startTime);
       const runExec = (cmd: string): Promise<boolean> => {
         return new Promise((resolve) => {
           exec(cmd, { timeout: 150000 }, (err) => {
