@@ -189,7 +189,7 @@
   </style>
 </head>
 
-<body class="bg-[#080f24] text-slate-100 font-sans min-h-screen antialiased selection:bg-rose-500 selection:text-white relative overflow-x-hidden" style="background: radial-gradient(circle at 50% 0%, #111d44 0%, #080f24 45%, #050a18 100%) fixed;">
+<body class="bg-[#080f24] text-slate-100 font-sans min-h-screen antialiased selection:bg-rose-500 selection:text-white relative overflow-x-clip" style="background: radial-gradient(circle at 50% 0%, #111d44 0%, #080f24 45%, #050a18 100%) fixed;">
 
   <!-- Ambient Glow Background (Rich Navy & Subtle Rose Glow) -->
   <div class="fixed inset-0 overflow-hidden pointer-events-none z-0">
@@ -391,12 +391,17 @@
       <!-- RESULT SECTION (PREVIEW, DOWNLOADS, TRIMMER, AI FORMATS) -->
       <section id="resultsSection" class="hidden w-full max-w-3xl mt-8 space-y-6">
 
-        <!-- Download Instant Notification Toast -->
-        <div id="downloadToast" class="hidden p-4 rounded-xl bg-emerald-950/90 border border-emerald-500/40 text-emerald-200 text-xs sm:text-sm flex items-center gap-3 shadow-2xl shadow-emerald-900/50 backdrop-blur-md transition-all">
-          <span class="text-emerald-400 text-lg flex-shrink-0 animate-bounce">📥</span>
-          <span id="downloadToastText" class="flex-1 font-semibold leading-snug"></span>
-          <a id="downloadToastSaveBtn" href="#" download="" rel="noopener" class="hidden px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex-shrink-0 transition">💾 Save</a>
-          <button onclick="document.getElementById('downloadToast').classList.add('hidden')" class="text-emerald-400 hover:text-white p-1">✕</button>
+        <!-- Download Instant Notification Toast (Sticky & Mobile-Safe Wrap) -->
+        <div id="downloadToast" class="hidden sticky top-[70px] z-30 w-full p-3.5 sm:p-4 rounded-xl bg-emerald-950/95 border border-emerald-500/50 text-emerald-100 text-xs sm:text-sm flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-3 shadow-2xl shadow-emerald-950/80 backdrop-blur-md transition-all">
+          <div class="flex items-start gap-2.5 flex-1 min-w-0">
+            <span class="text-emerald-400 text-lg flex-shrink-0 animate-bounce leading-none mt-0.5">📥</span>
+            <span id="downloadToastText" class="flex-1 min-w-0 font-semibold leading-snug break-all sm:break-words"></span>
+            <button onclick="document.getElementById('downloadToast').classList.add('hidden')" class="sm:hidden text-emerald-300 hover:text-white p-1 flex-shrink-0 leading-none" aria-label="Close">✕</button>
+          </div>
+          <div class="flex items-center justify-end gap-2 flex-shrink-0">
+            <a id="downloadToastSaveBtn" href="#" download="" rel="noopener" class="hidden w-full sm:w-auto text-center px-3.5 py-2 sm:py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex-shrink-0 transition shadow-md">💾 Save File</a>
+            <button onclick="document.getElementById('downloadToast').classList.add('hidden')" class="hidden sm:inline-flex text-emerald-300 hover:text-white p-1 flex-shrink-0" aria-label="Close">✕</button>
+          </div>
         </div>
 
         <!-- Video Card & Preview -->
@@ -1487,8 +1492,8 @@
         let finalEndpointUrl = endpointUrl;
         let resp = await fetch(endpointUrl);
 
-        // If primary download endpoint returned error, attempt fallback to clean download (except for trimmed/audio-extracted downloads)
-        if (!resp.ok && fallbackUrl && typeof fallbackUrl === 'string' && fallbackUrl.startsWith('http') && !endpointUrl.includes('download-clean') && !endpointUrl.includes('download-trim') && !endpointUrl.includes('extract-audio')) {
+        // If primary download endpoint returned error, attempt fallback to clean download (except for trimmed/audio-extracted/mp3 downloads)
+        if (!resp.ok && fallbackUrl && typeof fallbackUrl === 'string' && fallbackUrl.startsWith('http') && !endpointUrl.includes('download-clean') && !endpointUrl.includes('download-trim') && !endpointUrl.includes('extract-audio') && !endpointUrl.includes('format=mp3')) {
           try {
             const cleanDl = `${API_BASE}/api/download-clean?url=${encodeURIComponent(fallbackUrl)}&filename=${encodeURIComponent(filename)}`;
             const cleanResp = await fetch(cleanDl);
@@ -1515,17 +1520,48 @@
           return;
         }
 
-        const ct = resp.headers.get('content-type') || '';
+        let ct = resp.headers.get('content-type') || '';
         if (ct.includes('text') || ct.includes('json')) {
           const err = await resp.text();
-          toast.classList.add('hidden');
-          showError('Invalid media format: ' + (err.slice(0, 120) || 'Download error'));
-          return;
+          const trimmedErr = err.trim().toLowerCase();
+          if (trimmedErr.startsWith('<!doctype') || trimmedErr.startsWith('<html')) {
+            const retrySep = finalEndpointUrl.includes('?') ? '&' : '?';
+            const retryUrl = `${finalEndpointUrl}${retrySep}_r=${Date.now()}`;
+            try {
+              const retryResp = await fetch(retryUrl);
+              const retryCt = retryResp.headers.get('content-type') || '';
+              if (retryResp.ok && !retryCt.includes('text') && !retryCt.includes('json')) {
+                resp = retryResp;
+                ct = retryCt;
+                finalEndpointUrl = retryUrl;
+              } else {
+                toast.classList.add('hidden');
+                showError(currentLang === 'bn'
+                  ? '⚠️ অডিও/ভিডিও ফাইলটি এই মুহূর্তে পাওয়া যায়নি। পেজটি একবার রিফ্রেশ করে আবার চেষ্টা করুন।'
+                  : '⚠️ Media stream temporarily returned a webpage. Please refresh and try again.');
+                return;
+              }
+            } catch {
+              toast.classList.add('hidden');
+              showError(currentLang === 'bn'
+                ? '⚠️ অডিও/ভিডিও ফাইলটি এই মুহূর্তে পাওয়া যায়নি। অনুগ্রহ করে আবার চেষ্টা করুন।'
+                : '⚠️ Could not fetch media stream right now. Please try again.');
+              return;
+            }
+          } else {
+            toast.classList.add('hidden');
+            showError('Invalid media format: ' + (err.slice(0, 120) || 'Download error'));
+            return;
+          }
         }
 
-        // On Android (Chrome, Custom Tabs & In-App WebViews), use verified HTTPS attachment URL with unique _dl and target=_blank on Save File so sequential 2nd/3rd downloads are never blocked
-        const isAndroid = /Android/i.test(navigator.userAgent || '');
-        if (isAndroid) {
+        const totalBytes = parseInt(resp.headers.get('content-length') || '0', 10) || 0;
+        const ua = navigator.userAgent || '';
+        const isAndroid = /Android/i.test(ua);
+        const isInAppWebView = /; wv\)|\bGSA\/|\bFBAN\/|\bFBAV\/|\bInstagram\b|\bLine\/|\bMicroMessenger\b/i.test(ua);
+        const MAX_ANDROID_STREAM_BYTES = 105 * 1024 * 1024; // ~105 MB safe ceiling for mobile Blob streaming
+
+        const triggerAndroidNativeDownload = async () => {
           try { await resp.body?.cancel(); } catch {}
 
           const sep = finalEndpointUrl.includes('?') ? '&' : '?';
@@ -1544,9 +1580,10 @@
             };
             saveBtn.classList.remove('hidden');
           }
+          const sizeLabel = totalBytes > 0 ? ` (${(totalBytes / (1024 * 1024)).toFixed(1)} MB)` : '';
           toastText.textContent = currentLang === 'bn'
-            ? `📥 ডাউনলোড চলছে! সম্পূর্ণ না হলে বা সেভ করতে "সেভ করুন" বাটনে ট্যাপ করুন: ${filename}`
-            : `📥 Downloading! Keep this open or tap "Save File" if download didn't start: ${filename}`;
+            ? `📥 ডাউনলোড চলছে${sizeLabel}! সম্পূর্ণ না হলে বা সেভ করতে "সেভ করুন" বাটনে ট্যাপ করুন: ${filename}`
+            : `📥 Downloading${sizeLabel}! Keep this open or tap "Save File" if download didn't start: ${filename}`;
 
           const a = document.createElement('a');
           a.href = androidDlUrl;
@@ -1560,11 +1597,15 @@
           }, 1000);
 
           clearTimeout(downloadToastTimeout);
+        };
+
+        // On Android WebViews, unknown-size streams, or large >105 MB files, delegate safely to Chrome Download Manager
+        if (isAndroid && (isInAppWebView || totalBytes <= 0 || totalBytes > MAX_ANDROID_STREAM_BYTES || !resp.body || typeof resp.body.getReader !== 'function')) {
+          await triggerAndroidNativeDownload();
           return;
         }
 
-        // Stream verified response with live progress into Blob on Desktop so toast stays visibly updating until 100% done!
-        const totalBytes = parseInt(resp.headers.get('content-length') || '0', 10) || 0;
+        // Stream verified response with live 1%..100% progress into Blob (Desktop + Android Chrome <=105 MB)
         let blob;
         if (resp.body && typeof resp.body.getReader === 'function') {
           const reader = resp.body.getReader();
@@ -1575,10 +1616,16 @@
             const { done, value } = await reader.read();
             if (done) break;
             if (value) {
-              chunks.push(value);
               receivedBytes += value.byteLength;
+              if (isAndroid && receivedBytes > MAX_ANDROID_STREAM_BYTES) {
+                try { await reader.cancel(); } catch {}
+                chunks.length = 0;
+                await triggerAndroidNativeDownload();
+                return;
+              }
+              chunks.push(value);
               const now = Date.now();
-              if (now - lastUiUpdate >= 250) {
+              if (now - lastUiUpdate >= 200) {
                 lastUiUpdate = now;
                 const gotMb = (receivedBytes / (1024 * 1024)).toFixed(1);
                 if (totalBytes > 0) {
