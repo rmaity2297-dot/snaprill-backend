@@ -1582,8 +1582,8 @@
           }
           const sizeLabel = totalBytes > 0 ? ` (${(totalBytes / (1024 * 1024)).toFixed(1)} MB)` : '';
           toastText.textContent = currentLang === 'bn'
-            ? `📥 ডাউনলোড চলছে${sizeLabel}! সম্পূর্ণ না হলে বা সেভ করতে "সেভ করুন" বাটনে ট্যাপ করুন: ${filename}`
-            : `📥 Downloading${sizeLabel}! Keep this open or tap "Save File" if download didn't start: ${filename}`;
+            ? `📥 ব্যাকগ্রাউন্ডে ডাউনলোড হচ্ছে${sizeLabel}, শেষ হলে 'Open' অপশন আসবে। অনুগ্রহ করে অপেক্ষা করুন (শুরু না হয়ে থাকলে "সেভ করুন" চাপুন): ${filename}`
+            : `📥 ব্যাকগ্রাউন্ডে ডাউনলোড হচ্ছে${sizeLabel}, শেষ হলে 'Open' অপশন আসবে। Please wait (tap "Save File" only if it didn't start): ${filename}`;
 
           const a = document.createElement('a');
           a.href = androidDlUrl;
