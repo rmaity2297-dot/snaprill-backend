@@ -260,6 +260,12 @@ async function extractYouTubeWithClipto(ytId: string, forceRefresh = false): Pro
 
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
+      if (attempt > 0) {
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      const targetYtUrl = attempt === 1
+        ? `https://youtu.be/${ytId}`
+        : `https://www.youtube.com/watch?v=${ytId}`;
       const controller = new AbortController();
       const t = setTimeout(() => controller.abort(), 12000);
       const resp = await fetch('https://www.clipto.com/api/youtube', {
@@ -267,9 +273,11 @@ async function extractYouTubeWithClipto(ytId: string, forceRefresh = false): Pro
         signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+          'Origin': 'https://www.clipto.com',
+          'Referer': 'https://www.clipto.com/media-downloader/youtube-downloader',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
         },
-        body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${ytId}` }),
+        body: JSON.stringify({ url: targetYtUrl }),
       });
       clearTimeout(t);
       if (!resp.ok) continue;
@@ -284,13 +292,18 @@ async function extractYouTubeWithClipto(ytId: string, forceRefresh = false): Pro
         .filter((m) => m.type === 'video' && isMp4(m) && m.is_audio && m.url)
         .sort((a, b) => (b.height || 0) - (a.height || 0) || (b.bitrate || 0) - (a.bitrate || 0));
 
-      // Prefer 1080p/720p H.264 MP4 video stream for HD downloads
+      // Prefer <=1080p H.264 MP4 video stream for reliable muxing/trimming (avoid giant 4K AV1 streams first)
       const hdList = medias
-        .filter((m) => m.type === 'video' && isMp4(m) && m.url && String(m.mimeType || '').includes('avc1'))
+        .filter((m) => m.type === 'video' && isMp4(m) && m.url && String(m.mimeType || '').includes('avc1') && (m.height || 0) <= 1080)
         .sort((a, b) => (b.height || 0) - (a.height || 0) || (b.bitrate || 0) - (a.bitrate || 0));
       const fallbackVideoList = medias
         .filter((m) => m.type === 'video' && isMp4(m) && m.url)
-        .sort((a, b) => (b.height || 0) - (a.height || 0) || (b.bitrate || 0) - (a.bitrate || 0));
+        .sort((a, b) => {
+          const aCap = (a.height || 0) <= 1080 ? 1 : 0;
+          const bCap = (b.height || 0) <= 1080 ? 1 : 0;
+          if (bCap !== aCap) return bCap - aCap;
+          return (b.height || 0) - (a.height || 0) || (b.bitrate || 0) - (a.bitrate || 0);
+        });
 
       // Prefer AAC M4A audio stream
       const audioList = medias
@@ -1534,12 +1547,7 @@ app.get('/api/extract-audio', async (req: Request, res: Response) => {
       if (ffmpegErr || !existsSync(tempOutput) || statSync(tempOutput).size <= 1000) {
         cleanup();
         console.error('Audio extraction ffmpeg error:', ffmpegErr);
-        if (targetUrl.startsWith('http')) {
-          res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
-          res.setHeader('Content-Type', 'audio/mpeg');
-          return res.redirect(`/api/download?url=${encodeURIComponent(targetUrl)}&filename=${encodeURIComponent(cleanFilename)}`);
-        }
-        return res.status(500).send('Audio extraction failed');
+        return res.status(422).send('Audio extraction failed for this video stream. Please retry in a moment.');
       }
 
       res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
@@ -1921,7 +1929,8 @@ app.get('/api/download-youtube', async (req: Request, res: Response) => {
         const timer = setTimeout(() => ctrl.abort(), 150000);
         try {
           const streamResp = await fetch(directUrl, { signal: ctrl.signal });
-          if (streamResp.ok && streamResp.body) {
+          const bct = (streamResp.headers.get('content-type') || '').toLowerCase();
+          if (streamResp.ok && streamResp.body && !bct.includes('html') && !bct.includes('text') && !bct.includes('json')) {
             res.setHeader('Content-Disposition', `attachment; filename="${cleanFilename}"`);
             res.setHeader('Content-Type', mimeType);
             res.setHeader('Content-Transfer-Encoding', 'binary');
@@ -2070,8 +2079,9 @@ app.get('/api/download-clean', async (req: Request, res: Response) => {
     if (targetUrl.includes('tiktok') || targetUrl.includes('tikwm')) fetchHeaders['Referer'] = 'https://www.tiktok.com/';
 
     const remoteResp = await fetch(targetUrl, { headers: fetchHeaders, redirect: 'follow' });
-    if (!remoteResp.ok) {
-      return res.status(remoteResp.status).send('Failed to fetch source video for clean download');
+    const rct = (remoteResp.headers.get('content-type') || '').toLowerCase();
+    if (!remoteResp.ok || !remoteResp.body || rct.includes('html') || rct.includes('text') || rct.includes('json')) {
+      return res.status(remoteResp.ok ? 422 : remoteResp.status).send('Failed to fetch valid media stream for clean download');
     }
 
     // Set genuine attachment headers to download directly to user's local folder
@@ -2299,24 +2309,40 @@ app.get('/api/download-trim', async (req: Request, res: Response) => {
       // Extract YouTube stream if ytIdParam is provided (or resolved from URL)
       if (!inputReady && ytIdParam) {
         try {
-          const clipto = await extractYouTubeWithClipto(ytIdParam);
-          if (clipto) {
-            if (ext === 'mp3' && clipto.audioUrl) {
-              inputReady = await downloadToTempInput(clipto.audioUrl, {}, true);
-            } else if (clipto.muxedMp4Url) {
-              inputReady = await downloadToTempInput(clipto.muxedMp4Url);
-            } else if (clipto.hdVideoUrl && clipto.audioUrl) {
-              const vOk = await downloadToTempInput(clipto.hdVideoUrl, {}, true);
+          let clipto = await extractYouTubeWithClipto(ytIdParam);
+          const tryCliptoForTrim = async (c: typeof clipto): Promise<boolean> => {
+            if (!c) return false;
+            if (ext === 'mp3') {
+              const audCands = [c.audioUrl, c.fallbackAudioUrl, c.muxedMp4Url].filter(Boolean) as string[];
+              for (const audUrl of audCands) {
+                if (await downloadToTempInput(audUrl, {}, true)) return true;
+              }
+              return false;
+            }
+            if (c.muxedMp4Url && await downloadToTempInput(c.muxedMp4Url)) {
+              return true;
+            }
+            if (c.hdVideoUrl && c.audioUrl) {
+              const vOk = await downloadToTempInput(c.hdVideoUrl, {}, true);
               if (vOk) {
                 const audioDest = `/tmp/trim_aud_${timestamp}.m4a`;
-                if (await fetchFileForCache(clipto.audioUrl, audioDest, 150000)) {
+                if (await fetchFileForCache(c.audioUrl, audioDest, 150000)) {
                   tempTrimAudio = audioDest;
                 }
-                inputReady = true;
+                return true;
               }
-            } else if (clipto.hdVideoUrl || clipto.audioUrl) {
-              inputReady = await downloadToTempInput((clipto.hdVideoUrl || clipto.audioUrl)!);
             }
+            const fallbackSingle = c.hdVideoUrl || c.audioUrl;
+            if (fallbackSingle && await downloadToTempInput(fallbackSingle)) {
+              return true;
+            }
+            return false;
+          };
+
+          inputReady = await tryCliptoForTrim(clipto);
+          if (!inputReady) {
+            clipto = await extractYouTubeWithClipto(ytIdParam, true);
+            inputReady = await tryCliptoForTrim(clipto);
           }
         } catch (cliptoTrimErr) {
           console.warn('Clipto YouTube trim stream error:', cliptoTrimErr);
@@ -2838,6 +2864,11 @@ app.get('/api/get-package-json', (_req: Request, res: Response) => {
     return res.sendFile(pkgPath);
   }
   res.status(404).send('package.json not found');
+});
+
+// Prevent unmatched /api routes from falling through to Vite/SPA HTML index.html
+app.use('/api', (_req: Request, res: Response) => {
+  res.status(404).send('API endpoint not found');
 });
 
 // Setup Vite middleware in development or static serve in production
