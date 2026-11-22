@@ -1558,8 +1558,6 @@
         const totalBytes = parseInt(resp.headers.get('content-length') || '0', 10) || 0;
         const ua = navigator.userAgent || '';
         const isAndroid = /Android/i.test(ua);
-        const isInAppWebView = /; wv\)|\bGSA\/|\bFBAN\/|\bFBAV\/|\bInstagram\b|\bLine\/|\bMicroMessenger\b/i.test(ua);
-        const MAX_ANDROID_STREAM_BYTES = 105 * 1024 * 1024; // ~105 MB safe ceiling for mobile Blob streaming
 
         const triggerAndroidNativeDownload = async () => {
           try { await resp.body?.cancel(); } catch {}
@@ -1599,13 +1597,13 @@
           clearTimeout(downloadToastTimeout);
         };
 
-        // On Android WebViews, unknown-size streams, or large >105 MB files, delegate safely to Chrome Download Manager
-        if (isAndroid && (isInAppWebView || totalBytes <= 0 || totalBytes > MAX_ANDROID_STREAM_BYTES || !resp.body || typeof resp.body.getReader !== 'function')) {
+        // On Android (Chrome, Custom Tabs & In-App WebViews), always use direct HTTPS Download Manager URL so both auto-save and Save File work reliably for every file size
+        if (isAndroid) {
           await triggerAndroidNativeDownload();
           return;
         }
 
-        // Stream verified response with live 1%..100% progress into Blob (Desktop + Android Chrome <=105 MB)
+        // Stream verified response with live 1%..100% progress into Blob (Desktop)
         let blob;
         if (resp.body && typeof resp.body.getReader === 'function') {
           const reader = resp.body.getReader();
@@ -1617,12 +1615,6 @@
             if (done) break;
             if (value) {
               receivedBytes += value.byteLength;
-              if (isAndroid && receivedBytes > MAX_ANDROID_STREAM_BYTES) {
-                try { await reader.cancel(); } catch {}
-                chunks.length = 0;
-                await triggerAndroidNativeDownload();
-                return;
-              }
               chunks.push(value);
               const now = Date.now();
               if (now - lastUiUpdate >= 200) {
