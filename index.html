@@ -350,12 +350,12 @@
       <!-- BATCH MODE CONTAINER -->
       <section id="batchModeSection" class="hidden w-full max-w-2xl">
         <div class="bg-slate-900/90 border border-slate-800 p-4 sm:p-5 rounded-2xl shadow-2xl">
-          <div class="flex items-center justify-between mb-2">
-            <label class="text-sm font-bold text-white flex items-center gap-2">
+          <div class="flex items-center justify-between mb-2 gap-2">
+            <label class="text-sm font-bold text-white flex items-center gap-2 flex-wrap">
               <span>📦 Batch Downloader</span>
               <span class="text-xs font-normal text-slate-400">(Paste up to 5 URLs, 1 per line)</span>
             </label>
-            <span class="text-xs text-rose-400 font-semibold" id="batchCountBadge">0 URLs</span>
+            <span class="text-xs text-rose-400 font-semibold flex-shrink-0" id="batchCountBadge">0 / 5 URLs</span>
           </div>
 
           <textarea
@@ -368,15 +368,17 @@
 
           <div class="flex items-center justify-between mt-3 gap-2">
             <button
+              type="button"
               onclick="loadBatchDemo()"
               class="px-3 py-2 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
             >
               Paste Demo URLs
             </button>
             <button
+              type="button"
               id="batchFetchBtn"
               onclick="startBatchProcessing()"
-              class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-500 to-indigo-600 hover:from-rose-600 hover:to-indigo-700 text-white font-bold text-xs tracking-wide shadow-lg shadow-rose-500/25 flex items-center gap-2"
+              class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-500 to-indigo-600 hover:from-rose-600 hover:to-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold text-xs tracking-wide shadow-lg shadow-rose-500/25 flex items-center gap-2"
             >
               <span id="batchBtnSpinner" class="hidden w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
               <span id="batchBtnText">Process All URLs</span>
@@ -384,25 +386,32 @@
           </div>
         </div>
 
+        <!-- Batch Error / Notice Alert -->
+        <div id="batchErrorAlert" class="hidden mt-3 p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs sm:text-sm flex items-start gap-2.5">
+          <span class="text-rose-400 text-base leading-none mt-0.5">⚠️</span>
+          <div class="flex-1 min-w-0 break-words" id="batchErrorMessageText"></div>
+          <button type="button" onclick="hideBatchError()" class="text-rose-400 hover:text-rose-200 flex-shrink-0">✕</button>
+        </div>
+
         <!-- Batch Results List -->
         <div id="batchResultsList" class="mt-4 space-y-3"></div>
       </section>
 
-      <!-- RESULT SECTION (PREVIEW, DOWNLOADS, TRIMMER, AI FORMATS) -->
-      <section id="resultsSection" class="hidden w-full max-w-3xl mt-8 space-y-6">
-
-        <!-- Download Instant Notification Toast (Sticky & Mobile-Safe Wrap) -->
-        <div id="downloadToast" class="hidden sticky top-[70px] z-30 w-full p-3.5 sm:p-4 rounded-xl bg-emerald-950/95 border border-emerald-500/50 text-emerald-100 text-xs sm:text-sm flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-3 shadow-2xl shadow-emerald-950/80 backdrop-blur-md transition-all">
-          <div class="flex items-start gap-2.5 flex-1 min-w-0">
-            <span class="text-emerald-400 text-lg flex-shrink-0 animate-bounce leading-none mt-0.5">📥</span>
-            <span id="downloadToastText" class="flex-1 min-w-0 font-semibold leading-snug break-words [overflow-wrap:anywhere]"></span>
-            <button onclick="document.getElementById('downloadToast').classList.add('hidden')" class="sm:hidden text-emerald-300 hover:text-white p-1 flex-shrink-0 leading-none" aria-label="Close">✕</button>
-          </div>
-          <div class="flex items-center justify-end gap-2 flex-shrink-0">
-            <a id="downloadToastSaveBtn" href="#" download="" rel="noopener" class="hidden w-full sm:w-auto text-center px-3.5 py-2 sm:py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex-shrink-0 transition shadow-md">💾 Save File</a>
-            <button onclick="document.getElementById('downloadToast').classList.add('hidden')" class="hidden sm:inline-flex text-emerald-300 hover:text-white p-1 flex-shrink-0" aria-label="Close">✕</button>
-          </div>
+      <!-- Download Instant Notification Toast (Shared by Single & Batch Mode, Sticky & Mobile-Safe Wrap) -->
+      <div id="downloadToast" class="hidden sticky top-[70px] z-30 w-full max-w-3xl mt-6 p-3.5 sm:p-4 rounded-xl bg-emerald-950/95 border border-emerald-500/50 text-emerald-100 text-xs sm:text-sm flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-3 shadow-2xl shadow-emerald-950/80 backdrop-blur-md transition-all">
+        <div class="flex items-start gap-2.5 flex-1 min-w-0">
+          <span class="text-emerald-400 text-lg flex-shrink-0 animate-bounce leading-none mt-0.5">📥</span>
+          <span id="downloadToastText" class="flex-1 min-w-0 font-semibold leading-snug break-words [overflow-wrap:anywhere]"></span>
+          <button onclick="document.getElementById('downloadToast').classList.add('hidden')" class="sm:hidden text-emerald-300 hover:text-white p-1 flex-shrink-0 leading-none" aria-label="Close">✕</button>
         </div>
+        <div class="flex items-center justify-end gap-2 flex-shrink-0">
+          <a id="downloadToastSaveBtn" href="#" download="" rel="noopener" class="hidden w-full sm:w-auto text-center px-3.5 py-2 sm:py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex-shrink-0 transition shadow-md">💾 Save File</a>
+          <button onclick="document.getElementById('downloadToast').classList.add('hidden')" class="hidden sm:inline-flex text-emerald-300 hover:text-white p-1 flex-shrink-0" aria-label="Close">✕</button>
+        </div>
+      </div>
+
+      <!-- RESULT SECTION (PREVIEW, DOWNLOADS, TRIMMER, AI FORMATS) -->
+      <section id="resultsSection" class="hidden w-full max-w-3xl mt-6 space-y-6">
 
         <!-- Video Card & Preview -->
         <div class="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
@@ -1834,15 +1843,46 @@
     }
 
     // Batch Downloader Logic
+    window._batchResolvedItems = [];
+
+    function escapeBatchHtml(str) {
+      return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function showBatchError(msg) {
+      const box = document.getElementById('batchErrorAlert');
+      const txt = document.getElementById('batchErrorMessageText');
+      if (box && txt) {
+        txt.textContent = msg;
+        box.classList.remove('hidden');
+      }
+    }
+
+    function hideBatchError() {
+      const box = document.getElementById('batchErrorAlert');
+      if (box) box.classList.add('hidden');
+    }
+
     function updateBatchCount() {
       const lines = document.getElementById('batchTextarea').value
         .split('\n')
         .map(l => l.trim())
         .filter(l => l.length > 5);
-      document.getElementById('batchCountBadge').textContent = `${lines.length} URLs`;
+      const badge = document.getElementById('batchCountBadge');
+      if (!badge) return;
+      badge.textContent = lines.length > 5 ? `${lines.length} URLs (Max 5)` : `${lines.length} / 5 URLs`;
+      badge.className = lines.length > 5
+        ? 'text-xs text-amber-400 font-semibold flex-shrink-0'
+        : 'text-xs text-rose-400 font-semibold flex-shrink-0';
     }
 
     function loadBatchDemo() {
+      hideBatchError();
       const demoUrls = [
         'sample:sample-insta-1',
         'sample:sample-yt-1',
@@ -1852,74 +1892,163 @@
       updateBatchCount();
     }
 
+    function openBatchStudio(idx) {
+      const v = window._batchResolvedItems[idx];
+      if (!v) return;
+      hideBatchError();
+      renderVideoResults(v);
+    }
+
+    function downloadBatchItem(idx) {
+      const v = window._batchResolvedItems[idx];
+      if (!v) return;
+      hideBatchError();
+
+      const cleanBase = (v.title || `SnapRill_Batch_${idx + 1}`)
+        .slice(0, 35)
+        .replace(/[^a-zA-Z0-9_-]/g, '_')
+        .replace(/^_+|_+$/g, '') || `SnapRill_Batch_${idx + 1}`;
+      const cleanFilename = `${cleanBase}.mp4`;
+
+      const isMediaUrl = (u) => u && typeof u === 'string' && (u.startsWith('http') || u.startsWith('/assets/')) && !u.includes('ytimg.com') && !/\.(jpg|jpeg|png|webp)(\?|$)/i.test(u);
+      let streamUrl = isMediaUrl(v.videoUrl) ? v.videoUrl : '';
+      if (!streamUrl && Array.isArray(v.formats)) {
+        const found = v.formats.find(f => !f.isImageCover && isMediaUrl(f.url));
+        if (found) streamUrl = found.url;
+      }
+
+      if (v.platform === 'youtube' && v.id && !String(v.id).startsWith('sample-')) {
+        const dlUrl = `${API_BASE}/api/download-youtube?id=${encodeURIComponent(v.id)}&format=1080&filename=${encodeURIComponent(cleanFilename)}&url=${encodeURIComponent(streamUrl || '')}`;
+        executeDownload(dlUrl, cleanFilename, streamUrl);
+        return;
+      }
+
+      if (!streamUrl) {
+        showBatchError(
+          currentLang === 'bn'
+            ? `⚠️ #${idx + 1} ভিডিওর ডাউনলোড লিংক পাওয়া যায়নি। "Open Studio" থেকে চেষ্টা করুন।`
+            : `⚠️ Could not find a direct video stream for item #${idx + 1}. Try opening it in Studio.`
+        );
+        return;
+      }
+
+      const dlUrl = `${API_BASE}/api/download-clean?url=${encodeURIComponent(streamUrl)}&filename=${encodeURIComponent(cleanFilename)}`;
+      executeDownload(dlUrl, cleanFilename, streamUrl);
+    }
+
     async function startBatchProcessing() {
-      const lines = document.getElementById('batchTextarea').value
+      const fetchBtn = document.getElementById('batchFetchBtn');
+      if (fetchBtn && fetchBtn.disabled) return;
+      hideBatchError();
+
+      const rawLines = document.getElementById('batchTextarea').value
         .split('\n')
         .map(l => l.trim())
         .filter(l => l.length > 5);
 
-      if (lines.length === 0) {
-        showError('Please enter at least one video link in the batch box.');
+      if (rawLines.length === 0) {
+        showBatchError(
+          currentLang === 'bn'
+            ? 'দয়া করে Batch বক্সে অন্তত একটি সঠিক ভিডিও লিংক দিন।'
+            : 'Please enter at least one valid video link in the batch box.'
+        );
         return;
       }
+
+      if (rawLines.length > 5) {
+        showBatchError(
+          currentLang === 'bn'
+            ? 'একসাথে সর্বোচ্চ ৫টি লিংক প্রসেস করা যায় — প্রথম ৫টি লিংক প্রসেস করা হচ্ছে।'
+            : 'Maximum 5 URLs can be processed at once — processing the first 5 URLs.'
+        );
+      }
+
+      const lines = rawLines.slice(0, 5);
+      window._batchResolvedItems = [];
 
       const spinner = document.getElementById('batchBtnSpinner');
       const btnText = document.getElementById('batchBtnText');
       const resultsContainer = document.getElementById('batchResultsList');
       resultsContainer.innerHTML = '';
+
+      if (fetchBtn) fetchBtn.disabled = true;
       spinner.classList.remove('hidden');
-      btnText.textContent = 'Processing...';
+      btnText.textContent = currentLang === 'bn' ? 'প্রসেস হচ্ছে...' : 'Processing...';
 
-      for (let i = 0; i < lines.length; i++) {
-        const url = lines[i];
-        const itemCard = document.createElement('div');
-        itemCard.className = 'bg-slate-900 border border-slate-800 p-3.5 rounded-xl flex items-center justify-between gap-3 animate-pulse';
-        itemCard.id = `batch-item-${i}`;
-        itemCard.innerHTML = `
-          <div class="flex items-center gap-3 overflow-hidden">
-            <span class="text-xs font-mono font-bold text-slate-500">#${i + 1}</span>
-            <div class="truncate text-xs text-slate-300 font-mono">${url}</div>
-          </div>
-          <span class="text-xs text-rose-400">Loading...</span>
-        `;
-        resultsContainer.appendChild(itemCard);
+      try {
+        for (let i = 0; i < lines.length; i++) {
+          const url = lines[i];
+          const safeUrl = escapeBatchHtml(url);
+          const itemCard = document.createElement('div');
+          itemCard.className = 'bg-slate-900 border border-slate-800 p-3.5 rounded-xl flex items-center justify-between gap-3 animate-pulse';
+          itemCard.id = `batch-item-${i}`;
+          itemCard.innerHTML = `
+            <div class="flex items-center gap-3 min-w-0 flex-1">
+              <span class="text-xs font-mono font-bold text-slate-500 flex-shrink-0">#${i + 1}</span>
+              <div class="truncate text-xs text-slate-300 font-mono min-w-0">${safeUrl}</div>
+            </div>
+            <span class="text-xs text-rose-400 flex-shrink-0">Loading...</span>
+          `;
+          resultsContainer.appendChild(itemCard);
 
-        try {
-          const res = await fetch(`${API_BASE}/api/resolve`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url })
-          });
-          const json = await res.json();
-          if (json.success && json.data) {
-            const v = json.data;
-            itemCard.className = 'bg-slate-900 border border-slate-800 p-3.5 rounded-xl flex items-center justify-between gap-3';
-            itemCard.innerHTML = `
-              <div class="flex items-center gap-3 overflow-hidden">
-                <img src="${v.coverUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=120'}" class="w-10 h-10 rounded-lg object-cover" />
-                <div class="truncate">
-                  <div class="text-xs font-bold text-white truncate">${v.title}</div>
-                  <div class="text-[11px] text-slate-400">${v.author || '@creator'} • ${v.platform}</div>
+          try {
+            const res = await fetch(`${API_BASE}/api/resolve`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ url })
+            });
+            const json = await res.json().catch(() => ({}));
+
+            if (res.ok && json.success && json.data) {
+              const v = json.data;
+              window._batchResolvedItems[i] = v;
+              const safeTitle = escapeBatchHtml(v.title || `Video #${i + 1}`);
+              const safeAuthor = escapeBatchHtml(v.author || '@creator');
+              const safePlatform = escapeBatchHtml((v.platform || 'video').toUpperCase());
+              const safeCover = escapeBatchHtml(v.coverUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=120');
+
+              itemCard.className = 'bg-slate-900 border border-slate-800 p-3.5 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3';
+              itemCard.innerHTML = `
+                <div class="flex items-center gap-3 min-w-0 flex-1">
+                  <img src="${safeCover}" onerror="this.src='https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=120'" class="w-11 h-11 rounded-lg object-cover flex-shrink-0 bg-slate-800" />
+                  <div class="min-w-0 flex-1">
+                    <div class="text-xs font-bold text-white truncate">${safeTitle}</div>
+                    <div class="text-[11px] text-slate-400 truncate">${safeAuthor} • ${safePlatform}</div>
+                  </div>
                 </div>
-              </div>
-              <div class="flex items-center gap-2">
-                <button onclick="renderVideoResults(${JSON.stringify(v).replace(/"/g, '&quot;')})" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-xs text-slate-200">
-                  Open Studio
-                </button>
-                <a href="${API_BASE}/api/download-clean?url=${encodeURIComponent(v.videoUrl || '')}&filename=Batch_${i + 1}.mp4" download="Batch_${i + 1}.mp4" class="px-3 py-1 rounded bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs flex items-center gap-1">
-                  <span>📥</span> Download
-                </a>
-              </div>
+                <div class="flex items-center justify-end gap-2 flex-shrink-0">
+                  <button type="button" onclick="openBatchStudio(${i})" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 transition-colors">
+                    Open Studio
+                  </button>
+                  <button type="button" onclick="downloadBatchItem(${i})" class="px-3 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs flex items-center gap-1 transition-colors">
+                    <span>📥</span> Download
+                  </button>
+                </div>
+              `;
+            } else {
+              const errMsg = escapeBatchHtml(json.error || `Failed (${res.status || 'Error'})`);
+              itemCard.className = 'bg-rose-950/20 border border-rose-900/50 p-3.5 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-rose-300';
+              itemCard.innerHTML = `
+                <div class="min-w-0 flex-1">
+                  <div class="font-semibold text-rose-400">#${i + 1} Failed to resolve</div>
+                  <div class="text-[11px] text-rose-300/80 break-words">${errMsg}</div>
+                </div>
+                <span class="text-[11px] text-slate-400 font-mono truncate max-w-full sm:max-w-[200px]">${safeUrl}</span>
+              `;
+            }
+          } catch {
+            itemCard.className = 'bg-rose-950/20 border border-rose-900/50 p-3.5 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-rose-300';
+            itemCard.innerHTML = `
+              <span class="font-semibold text-rose-400">#${i + 1} Network error — could not resolve</span>
+              <span class="text-[11px] text-slate-400 font-mono truncate max-w-full sm:max-w-[220px]">${safeUrl}</span>
             `;
           }
-        } catch {
-          itemCard.className = 'bg-rose-950/20 border border-rose-900/50 p-3 rounded-xl flex items-center justify-between text-xs text-rose-400';
-          itemCard.innerHTML = `<span>#${i + 1} Failed to resolve</span><span class="text-slate-500 truncate">${url}</span>`;
         }
+      } finally {
+        if (fetchBtn) fetchBtn.disabled = false;
+        spinner.classList.add('hidden');
+        btnText.textContent = i18n[currentLang].batchBtn;
       }
-
-      spinner.classList.add('hidden');
-      btnText.textContent = i18n[currentLang].batchBtn;
     }
 
     // History Logic
