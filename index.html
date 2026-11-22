@@ -395,7 +395,7 @@
         <div id="downloadToast" class="hidden sticky top-[70px] z-30 w-full p-3.5 sm:p-4 rounded-xl bg-emerald-950/95 border border-emerald-500/50 text-emerald-100 text-xs sm:text-sm flex flex-col sm:flex-row sm:items-center gap-2.5 sm:gap-3 shadow-2xl shadow-emerald-950/80 backdrop-blur-md transition-all">
           <div class="flex items-start gap-2.5 flex-1 min-w-0">
             <span class="text-emerald-400 text-lg flex-shrink-0 animate-bounce leading-none mt-0.5">📥</span>
-            <span id="downloadToastText" class="flex-1 min-w-0 font-semibold leading-snug break-all sm:break-words"></span>
+            <span id="downloadToastText" class="flex-1 min-w-0 font-semibold leading-snug break-words [overflow-wrap:anywhere]"></span>
             <button onclick="document.getElementById('downloadToast').classList.add('hidden')" class="sm:hidden text-emerald-300 hover:text-white p-1 flex-shrink-0 leading-none" aria-label="Close">✕</button>
           </div>
           <div class="flex items-center justify-end gap-2 flex-shrink-0">
@@ -1564,35 +1564,23 @@
 
           const sep = finalEndpointUrl.includes('?') ? '&' : '?';
           const androidDlUrl = `${finalEndpointUrl}${sep}_dl=${Date.now()}`;
+          const sizeLabel = totalBytes > 0 ? ` (${(totalBytes / (1024 * 1024)).toFixed(1)} MB)` : '';
 
           if (saveBtn) {
             saveBtn.removeAttribute('download');
             saveBtn.target = '_blank';
             saveBtn.rel = 'noopener';
             saveBtn.href = androidDlUrl;
-            saveBtn.textContent = currentLang === 'bn' ? '💾 সেভ করুন' : '💾 Save File';
+            saveBtn.textContent = '💾 Save File';
             saveBtn.onclick = function() {
               const freshSep = finalEndpointUrl.includes('?') ? '&' : '?';
               saveBtn.href = `${finalEndpointUrl}${freshSep}_dl=${Date.now()}`;
+              toastText.textContent = `📥 ডাউনলোড শুরু হয়েছে${sizeLabel}! ব্যাকগ্রাউন্ডে ডাউনলোড চলছে, অনুগ্রহ করে অপেক্ষা করুন। শেষ হলেই ওপেন ফাইল অপশনটা আসবে।`;
               return true;
             };
             saveBtn.classList.remove('hidden');
           }
-          const sizeLabel = totalBytes > 0 ? ` (${(totalBytes / (1024 * 1024)).toFixed(1)} MB)` : '';
-          toastText.textContent = currentLang === 'bn'
-            ? `📥 ব্যাকগ্রাউন্ডে ডাউনলোড হচ্ছে${sizeLabel}, শেষ হলে 'Open' অপশন আসবে। অনুগ্রহ করে অপেক্ষা করুন (শুরু না হয়ে থাকলে "সেভ করুন" চাপুন): ${filename}`
-            : `📥 ব্যাকগ্রাউন্ডে ডাউনলোড হচ্ছে${sizeLabel}, শেষ হলে 'Open' অপশন আসবে। Please wait (tap "Save File" only if it didn't start): ${filename}`;
-
-          const a = document.createElement('a');
-          a.href = androidDlUrl;
-          a.download = filename;
-          a.rel = 'noopener';
-          a.style.display = 'none';
-          document.body.appendChild(a);
-          a.click();
-          setTimeout(() => {
-            if (document.body.contains(a)) document.body.removeChild(a);
-          }, 1000);
+          toastText.textContent = `✅ ফাইল রেডি${sizeLabel}! ডাউনলোড করতে প্রথমে "Save File"-এ ক্লিক করুন, তারপর অপেক্ষা করুন — একটু পরেই 'Open File' অপশন আসবে: ${filename}`;
 
           clearTimeout(downloadToastTimeout);
         };
