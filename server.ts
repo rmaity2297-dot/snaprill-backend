@@ -374,6 +374,57 @@ async function extractYouTubeWithClipto(ytId: string, forceRefresh = false): Pro
   return bestMeta;
 }
 
+// Fast Clipto Extractor for Instagram Reels & Facebook Watch/Reels
+async function extractSocialWithClipto(targetUrl: string, refererPath: string): Promise<{
+  title?: string;
+  author?: string;
+  thumbnail?: string;
+  duration?: number;
+  likes?: number | string;
+  videoUrl?: string;
+  audioUrl?: string;
+} | null> {
+  try {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 8500);
+    const resp = await fetch('https://www.clipto.com/api/youtube', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'Origin': 'https://www.clipto.com',
+        'Referer': `https://www.clipto.com${refererPath}`,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      },
+      body: JSON.stringify({ url: targetUrl }),
+    });
+    clearTimeout(t);
+    if (!resp.ok) return null;
+    const d: any = await resp.json().catch(() => null);
+    if (!d || !d.success || !Array.isArray(d.medias)) return null;
+
+    const videos = d.medias.filter((m: any) => m.type === 'video' && m.url);
+    const audios = d.medias.filter((m: any) => m.type === 'audio' && m.url);
+    const preferredVideo =
+      videos.find((m: any) => (m.extension || m.ext) === 'mp4' && m.is_audio !== false) ||
+      videos.find((m: any) => (m.extension || m.ext) === 'mp4') ||
+      videos[0];
+    const preferredAudio = audios[0] || preferredVideo;
+
+    return {
+      title: d.title ? String(d.title) : undefined,
+      author: d.author ? String(d.author) : undefined,
+      thumbnail: d.thumbnail ? String(d.thumbnail) : undefined,
+      duration: d.duration && !isNaN(Number(d.duration)) && Number(d.duration) > 0 ? Math.round(Number(d.duration)) : undefined,
+      likes: d.like_count,
+      videoUrl: preferredVideo?.url,
+      audioUrl: preferredAudio?.url,
+    };
+  } catch {
+    return null;
+  }
+}
+
 import { chmodSync, existsSync, statSync } from 'fs';
 import { createHash } from 'crypto';
 
@@ -1040,51 +1091,83 @@ app.all(['/api/resolve', '/api/resolve-video'], async (req: Request, res: Respon
     if (platform === 'instagram') {
       const igCode = extractInstagramCode(rawUrl);
       const shortcode = igCode || 'reel';
+      const normalizedIgUrl = (shortcode && shortcode !== 'reel' && /\/(reel|reels)\//i.test(rawUrl))
+        ? `https://www.instagram.com/reel/${shortcode}/`
+        : rawUrl.split('?')[0];
       let title = `Instagram Reel (@${shortcode})`;
       let author = '@instagram_creator';
       let authorName = 'Instagram Reel Creator';
       let coverUrl = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80';
-      let duration = 30;
+      let duration = 0;
+      let likesText = 'Active';
       let directMp4Url = '';
       let directAudioUrl = '';
       let formatsList: any[] = [];
 
-      // Try public Instagram oEmbed to fetch real caption, author, and poster thumbnail
-      if (shortcode && shortcode !== 'reel') {
-        try {
-          const igOembedResp = await fetch(`https://api.instagram.com/oembed/?url=https://www.instagram.com/reel/${shortcode}/`);
-          if (igOembedResp.ok) {
-            const igData: any = await igOembedResp.json();
-            if (igData.title) title = igData.title;
-            if (igData.author_name) {
-              author = `@${igData.author_name}`;
-              authorName = igData.author_name;
-            }
-            if (igData.thumbnail_url) coverUrl = igData.thumbnail_url;
+      // 1. Run Clipto + btch igdl concurrently for fast (~1-3s) real Instagram resolution
+      const [cliptoIg, btchIg] = await Promise.all([
+        extractSocialWithClipto(normalizedIgUrl, '/media-downloader/instagram-downloader'),
+        (async () => {
+          try {
+            const { igdl } = await import('btch-downloader');
+            return await Promise.race([
+              igdl(normalizedIgUrl),
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000)),
+            ]);
+          } catch (e) {
+            console.warn('Instagram btch igdl warning:', e);
+            return null;
           }
-        } catch (oembedErr) {
-          // silently continue
+        })(),
+      ]);
+
+      if (cliptoIg) {
+        if (cliptoIg.title) title = cliptoIg.title;
+        if (cliptoIg.author) {
+          authorName = cliptoIg.author;
+          author = cliptoIg.author.startsWith('@') ? cliptoIg.author : `@${cliptoIg.author}`;
+        }
+        if (cliptoIg.thumbnail) coverUrl = cliptoIg.thumbnail;
+        if (cliptoIg.duration) duration = cliptoIg.duration;
+        if (cliptoIg.likes) likesText = Number(cliptoIg.likes).toLocaleString();
+        if (cliptoIg.videoUrl) directMp4Url = cliptoIg.videoUrl;
+        if (cliptoIg.audioUrl) directAudioUrl = cliptoIg.audioUrl;
+      }
+
+      if (!directMp4Url && btchIg && btchIg.status && Array.isArray(btchIg.result) && btchIg.result[0]?.url) {
+        directMp4Url = btchIg.result[0].url;
+        directAudioUrl = directMp4Url;
+        if (btchIg.result[0].thumbnail && coverUrl.includes('unsplash.com')) {
+          coverUrl = btchIg.result[0].thumbnail;
         }
       }
 
-      // 1. Try snapsave-media-downloader
-      try {
-        const { snapsave } = await import('snapsave-media-downloader');
-        const snapRes: any = await snapsave(rawUrl);
-        if (snapRes && snapRes.success && snapRes.data?.media?.[0]?.url) {
-          directMp4Url = snapRes.data.media[0].url;
-          directAudioUrl = directMp4Url;
-          if (snapRes.data.description) title = snapRes.data.description;
-          if (snapRes.data.preview) coverUrl = snapRes.data.preview;
-        }
-      } catch (snapErr) {
-        console.warn('Instagram snapsave warning:', snapErr);
-      }
-
-      // 2. Try yt-dlp binary
+      // 2. Fallback to snapsave (bounded to 6s so analyzing never hangs 40s+)
       if (!directMp4Url) {
         try {
-          const d = await extractWithYtDlp(rawUrl);
+          const { snapsave } = await import('snapsave-media-downloader');
+          const snapRes: any = await Promise.race([
+            snapsave(rawUrl),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000)),
+          ]);
+          if (snapRes && snapRes.success && snapRes.data?.media?.[0]?.url) {
+            directMp4Url = snapRes.data.media[0].url;
+            directAudioUrl = directMp4Url;
+            if (snapRes.data.description) title = snapRes.data.description;
+            if (snapRes.data.preview) coverUrl = snapRes.data.preview;
+          }
+        } catch (snapErr) {
+          console.warn('Instagram snapsave warning:', snapErr);
+        }
+      }
+
+      // 3. Final fallback via yt-dlp binary (bounded to 12s)
+      if (!directMp4Url) {
+        try {
+          const d = await Promise.race([
+            extractWithYtDlp(rawUrl),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 12000)),
+          ]);
           if (d) {
             title = d.title || title;
             author = d.uploader ? `@${d.uploader}` : author;
@@ -1114,15 +1197,19 @@ app.all(['/api/resolve', '/api/resolve-video'], async (req: Request, res: Respon
         }
       }
 
-      if (directMp4Url) {
-        formatsList = [
-          { quality: 'Original HD Video (MP4)', format: 'MP4', size: 'Full Video', url: directMp4Url },
-          { quality: 'Mobile 720p Video (MP4)', format: 'MP4', size: 'Standard Video', url: directMp4Url }
-        ];
+      if (!directMp4Url) {
+        return res.status(422).json({
+          success: false,
+          error: 'Could not extract this Instagram Reel stream right now. Please make sure the post/reel is public and try again.',
+        });
       }
 
-      // Do NOT send dummy ocean video to user; only genuine stream if extracted
-      const finalMp4Url = directMp4Url || '';
+      formatsList = [
+        { quality: 'Original HD Video (MP4)', format: 'MP4', size: 'Full Video', url: directMp4Url },
+        { quality: 'Mobile 720p Video (MP4)', format: 'MP4', size: 'Standard Video', url: directMp4Url }
+      ];
+
+      const finalMp4Url = directMp4Url;
       const finalAudioUrl = directAudioUrl || finalMp4Url;
 
       const resolved = {
@@ -1139,17 +1226,12 @@ app.all(['/api/resolve', '/api/resolve-video'], async (req: Request, res: Respon
         coverUrl: coverUrl,
         duration: duration,
         views: 'Reels Trending',
-        likes: 'Active',
+        likes: likesText,
         comments: 'Instagram',
-        formats: formatsList.length > 0 ? formatsList : [
-          { quality: 'Original HD 1080p Video', format: 'MP4', size: 'HD Stream', url: finalMp4Url },
-          { quality: 'Mobile 720p Clean Video', format: 'MP4', size: 'Mobile Stream', url: finalMp4Url }
-        ]
+        formats: formatsList
       };
 
-      if (finalMp4Url) {
-        triggerBackgroundDirectPrecache(getMediaCacheKey('', rawUrl), finalMp4Url);
-      }
+      triggerBackgroundDirectPrecache(getMediaCacheKey('', rawUrl), finalMp4Url);
       return res.json({ success: true, data: resolved });
     }
 
@@ -1159,28 +1241,70 @@ app.all(['/api/resolve', '/api/resolve-video'], async (req: Request, res: Respon
       let author = '@facebook_creator';
       let authorName = 'Facebook Creator';
       let coverUrl = 'https://images.unsplash.com/photo-1579202673506-ca3ce28943ef?w=800&auto=format&fit=crop&q=80';
-      let duration = 25;
+      let duration = 0;
       let directMp4Url = '';
       let directAudioUrl = '';
       let formatsList: any[] = [];
 
-      // 1. Try ruhend-scraper fbdl (Tested and verified for real progressive FB videos)
-      try {
-        const { fbdl } = await import('ruhend-scraper');
-        const fbUrls = await fbdl(rawUrl);
-        if (Array.isArray(fbUrls) && fbUrls.length > 0 && fbUrls[0]) {
-          directMp4Url = fbUrls[0];
-          directAudioUrl = fbUrls[0];
+      // 1. Run Clipto + btch fbdown concurrently for fast real Facebook stream resolution
+      const [cliptoFb, btchFb] = await Promise.all([
+        extractSocialWithClipto(rawUrl, '/media-downloader/facebook-downloader'),
+        (async () => {
+          try {
+            const { fbdown } = await import('btch-downloader');
+            return await Promise.race([
+              fbdown(rawUrl),
+              new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000)),
+            ]);
+          } catch (e) {
+            console.warn('Facebook btch fbdown warning:', e);
+            return null;
+          }
+        })(),
+      ]);
+
+      if (cliptoFb) {
+        if (cliptoFb.title) title = cliptoFb.title;
+        if (cliptoFb.author) {
+          authorName = cliptoFb.author;
+          author = cliptoFb.author.startsWith('@') ? cliptoFb.author : `@${cliptoFb.author}`;
         }
-      } catch (fbdlErr) {
-        console.warn('ruhend-scraper fbdl warning:', fbdlErr);
+        if (cliptoFb.thumbnail) coverUrl = cliptoFb.thumbnail;
+        if (cliptoFb.duration) duration = cliptoFb.duration;
+        if (cliptoFb.videoUrl) directMp4Url = cliptoFb.videoUrl;
+        if (cliptoFb.audioUrl) directAudioUrl = cliptoFb.audioUrl;
       }
 
-      // 2. Try snapsave-media-downloader
+      if (!directMp4Url && btchFb && btchFb.status && (btchFb.HD || btchFb.Normal_video)) {
+        directMp4Url = btchFb.HD || btchFb.Normal_video;
+        directAudioUrl = directMp4Url;
+      }
+
+      // 2. Fallback to ruhend-scraper fbdl (bounded to 5s)
+      if (!directMp4Url) {
+        try {
+          const { fbdl } = await import('ruhend-scraper');
+          const fbUrls: any = await Promise.race([
+            fbdl(rawUrl),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 5000)),
+          ]);
+          if (Array.isArray(fbUrls) && fbUrls.length > 0 && fbUrls[0]) {
+            directMp4Url = fbUrls[0];
+            directAudioUrl = fbUrls[0];
+          }
+        } catch (fbdlErr) {
+          console.warn('ruhend-scraper fbdl warning:', fbdlErr);
+        }
+      }
+
+      // 3. Fallback to snapsave (bounded to 6s)
       if (!directMp4Url) {
         try {
           const { snapsave } = await import('snapsave-media-downloader');
-          const snapRes: any = await snapsave(rawUrl);
+          const snapRes: any = await Promise.race([
+            snapsave(rawUrl),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 6000)),
+          ]);
           if (snapRes && snapRes.success && snapRes.data?.media?.[0]?.url) {
             directMp4Url = snapRes.data.media[0].url;
             directAudioUrl = directMp4Url;
@@ -1192,10 +1316,13 @@ app.all(['/api/resolve', '/api/resolve-video'], async (req: Request, res: Respon
         }
       }
 
-      // 3. Try yt-dlp binary
+      // 4. Final fallback via yt-dlp binary (bounded to 12s)
       if (!directMp4Url) {
         try {
-          const d = await extractWithYtDlp(rawUrl);
+          const d = await Promise.race([
+            extractWithYtDlp(rawUrl),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 12000)),
+          ]);
           if (d) {
             title = d.title || title;
             author = d.uploader ? `@${d.uploader}` : author;
@@ -1226,14 +1353,19 @@ app.all(['/api/resolve', '/api/resolve-video'], async (req: Request, res: Respon
         }
       }
 
-      if (directMp4Url) {
-        formatsList = [
-          { quality: 'Facebook HD 1080p Video', format: 'MP4', size: 'Original Stream', url: directMp4Url },
-          { quality: 'Facebook SD 720p Video', format: 'MP4', size: 'Mobile Stream', url: directMp4Url }
-        ];
+      if (!directMp4Url) {
+        return res.status(422).json({
+          success: false,
+          error: 'Could not extract this Facebook video stream right now. Please make sure the video/reel is public and try again.',
+        });
       }
 
-      const finalFbMp4Url = directMp4Url || '';
+      formatsList = [
+        { quality: 'Facebook HD 1080p Video', format: 'MP4', size: 'Original Stream', url: directMp4Url },
+        { quality: 'Facebook SD 720p Video', format: 'MP4', size: 'Mobile Stream', url: directMp4Url }
+      ];
+
+      const finalFbMp4Url = directMp4Url;
       const finalFbAudioUrl = directAudioUrl || finalFbMp4Url;
 
       const resolved = {
@@ -1251,15 +1383,10 @@ app.all(['/api/resolve', '/api/resolve-video'], async (req: Request, res: Respon
         views: 'FB Watch Viral',
         likes: 'Recommended',
         comments: 'Reels',
-        formats: formatsList.length > 0 ? formatsList : [
-          { quality: 'Facebook HD 1080p Video', format: 'MP4', size: 'Original HD', url: finalFbMp4Url },
-          { quality: 'Mobile 720p Video', format: 'MP4', size: 'Fast Stream', url: finalFbMp4Url }
-        ]
+        formats: formatsList
       };
 
-      if (finalFbMp4Url) {
-        triggerBackgroundDirectPrecache(getMediaCacheKey('', rawUrl), finalFbMp4Url);
-      }
+      triggerBackgroundDirectPrecache(getMediaCacheKey('', rawUrl), finalFbMp4Url);
       return res.json({ success: true, data: resolved });
     }
 
@@ -1314,35 +1441,47 @@ app.get('/api/proxy-stream', async (req: Request, res: Response) => {
       headers['Referer'] = 'https://www.instagram.com/';
     }
 
-    const client = targetUrl.startsWith('https:') ? https : http;
-    const request = client.get(targetUrl, { headers }, (remoteRes) => {
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Headers', 'Range');
-      res.setHeader('Accept-Ranges', 'bytes');
+    const pipeStreamWithRedirects = (currentUrl: string, redirectsLeft = 3) => {
+      const client = currentUrl.startsWith('https:') ? https : http;
+      const request = client.get(currentUrl, { headers }, (remoteRes) => {
+        const statusCode = remoteRes.statusCode || 200;
+        if ([301, 302, 303, 307, 308].includes(statusCode) && remoteRes.headers.location && redirectsLeft > 0) {
+          remoteRes.resume();
+          const nextUrl = new URL(remoteRes.headers.location, currentUrl).toString();
+          return pipeStreamWithRedirects(nextUrl, redirectsLeft - 1);
+        }
 
-      if (remoteRes.headers['content-type']) {
-        res.setHeader('Content-Type', remoteRes.headers['content-type']);
-      } else {
-        res.setHeader('Content-Type', 'video/mp4');
-      }
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Headers', 'Range');
+        res.setHeader('Accept-Ranges', 'bytes');
 
-      if (remoteRes.headers['content-length']) {
-        res.setHeader('Content-Length', remoteRes.headers['content-length']);
-      }
-      if (remoteRes.headers['content-range']) {
-        res.setHeader('Content-Range', remoteRes.headers['content-range']);
-      }
+        const rawCt = (remoteRes.headers['content-type'] || '').toLowerCase();
+        if (rawCt && !rawCt.includes('application/octet-stream')) {
+          res.setHeader('Content-Type', remoteRes.headers['content-type'] as string);
+        } else {
+          res.setHeader('Content-Type', 'video/mp4');
+        }
 
-      res.status(remoteRes.statusCode || 200);
-      remoteRes.pipe(res);
-    });
+        if (remoteRes.headers['content-length']) {
+          res.setHeader('Content-Length', remoteRes.headers['content-length']);
+        }
+        if (remoteRes.headers['content-range']) {
+          res.setHeader('Content-Range', remoteRes.headers['content-range']);
+        }
 
-    request.on('error', (err) => {
-      console.error('Proxy stream error:', err);
-      if (!res.headersSent) {
-        res.status(502).send('Error streaming media');
-      }
-    });
+        res.status(statusCode);
+        remoteRes.pipe(res);
+      });
+
+      request.on('error', (err) => {
+        console.error('Proxy stream error:', err);
+        if (!res.headersSent) {
+          res.status(502).send('Error streaming media');
+        }
+      });
+    };
+
+    pipeStreamWithRedirects(targetUrl);
   } catch (err: any) {
     console.error('Proxy setup error:', err);
     res.status(500).send('Internal stream error');
