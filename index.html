@@ -174,6 +174,25 @@
     .smooth-button:active {
       transform: translateY(1px) scale(0.98);
     }
+    /* Smooth FAQ Accordion without layout jump or mobile scroll vibration */
+    #faqAccordionContainer, .faq-item {
+      overflow-anchor: none;
+    }
+    .faq-answer-wrap {
+      display: grid;
+      grid-template-rows: 0fr;
+      opacity: 0;
+      transition: grid-template-rows 0.28s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.22s ease;
+      overflow-anchor: none;
+    }
+    .faq-answer-wrap.is-open {
+      grid-template-rows: 1fr;
+      opacity: 1;
+    }
+    .faq-answer-inner {
+      overflow: hidden;
+      min-height: 0;
+    }
     .smooth-card {
       transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
     }
@@ -439,6 +458,7 @@
                   id="previewThumbnailImg"
                   src=""
                   alt="Video thumbnail"
+                  referrerpolicy="no-referrer"
                   class="w-full h-full object-cover"
                 />
                 <button
@@ -692,54 +712,70 @@
 
         <div class="space-y-3" id="faqAccordionContainer">
           <!-- FAQ Item 1 -->
-          <div class="faq-item rounded-2xl bg-[#0e1b3d]/85 border border-blue-900/40 overflow-hidden transition-all duration-300">
-            <button onclick="toggleFaq(0)" class="w-full p-4 text-left flex items-center justify-between gap-3 text-sm sm:text-base font-semibold text-white hover:text-rose-400 transition-colors">
+          <div class="faq-item rounded-2xl bg-[#0e1b3d]/85 border border-blue-900/40 overflow-hidden">
+            <button type="button" onclick="toggleFaq(0)" class="w-full p-4 text-left flex items-center justify-between gap-3 text-sm sm:text-base font-semibold text-white hover:text-rose-400 transition-colors">
               <span id="faqQ0">Is SnapRill 100% free with unlimited downloads?</span>
               <svg id="faqIcon0" class="w-4 h-4 text-blue-300 transform transition-transform duration-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
               </svg>
             </button>
-            <div id="faqA0" class="hidden px-4 pb-4 pt-1 text-xs sm:text-sm text-slate-300 border-t border-blue-900/30 leading-relaxed">
-              <span id="faqAText0">Yes, completely free! There are no hidden subscription charges, usage limits, or account logins required. You can download and save as many Facebook Reels, YouTube Shorts, Instagram Reels, and TikTok videos as you want.</span>
+            <div id="faqA0" class="faq-answer-wrap">
+              <div class="faq-answer-inner">
+                <div class="px-4 pb-4 pt-2 text-xs sm:text-sm text-slate-300 border-t border-blue-900/30 leading-relaxed">
+                  <span id="faqAText0">Yes, completely free! There are no hidden subscription charges, usage limits, or account logins required. You can download and save as many Facebook Reels, YouTube Shorts, Instagram Reels, and TikTok videos as you want.</span>
+                </div>
+              </div>
             </div>
           </div>
 
           <!-- FAQ Item 2 -->
-          <div class="faq-item rounded-2xl bg-[#0e1b3d]/85 border border-blue-900/40 overflow-hidden transition-all duration-300">
-            <button onclick="toggleFaq(1)" class="w-full p-4 text-left flex items-center justify-between gap-3 text-sm sm:text-base font-semibold text-white hover:text-rose-400 transition-colors">
+          <div class="faq-item rounded-2xl bg-[#0e1b3d]/85 border border-blue-900/40 overflow-hidden">
+            <button type="button" onclick="toggleFaq(1)" class="w-full p-4 text-left flex items-center justify-between gap-3 text-sm sm:text-base font-semibold text-white hover:text-rose-400 transition-colors">
               <span id="faqQ1">Will my downloaded videos have watermarks or logos?</span>
               <svg id="faqIcon1" class="w-4 h-4 text-blue-300 transform transition-transform duration-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
               </svg>
             </button>
-            <div id="faqA1" class="hidden px-4 pb-4 pt-1 text-xs sm:text-sm text-slate-300 border-t border-blue-900/30 leading-relaxed">
-              <span id="faqAText1">No, never! All videos are downloaded in their clean, original high-definition format without any watermarks, stamps, or promotional overlays added by SnapRill.</span>
+            <div id="faqA1" class="faq-answer-wrap">
+              <div class="faq-answer-inner">
+                <div class="px-4 pb-4 pt-2 text-xs sm:text-sm text-slate-300 border-t border-blue-900/30 leading-relaxed">
+                  <span id="faqAText1">No, never! All videos are downloaded in their clean, original high-definition format without any watermarks, stamps, or promotional overlays added by SnapRill.</span>
+                </div>
+              </div>
             </div>
           </div>
 
           <!-- FAQ Item 3 -->
-          <div class="faq-item rounded-2xl bg-[#0e1b3d]/85 border border-blue-900/40 overflow-hidden transition-all duration-300">
-            <button onclick="toggleFaq(2)" class="w-full p-4 text-left flex items-center justify-between gap-3 text-sm sm:text-base font-semibold text-white hover:text-rose-400 transition-colors">
+          <div class="faq-item rounded-2xl bg-[#0e1b3d]/85 border border-blue-900/40 overflow-hidden">
+            <button type="button" onclick="toggleFaq(2)" class="w-full p-4 text-left flex items-center justify-between gap-3 text-sm sm:text-base font-semibold text-white hover:text-rose-400 transition-colors">
               <span id="faqQ2">Can I extract MP3 audio and trim custom video clips?</span>
               <svg id="faqIcon2" class="w-4 h-4 text-blue-300 transform transition-transform duration-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
               </svg>
             </button>
-            <div id="faqA2" class="hidden px-4 pb-4 pt-1 text-xs sm:text-sm text-slate-300 border-t border-blue-900/30 leading-relaxed">
-              <span id="faqAText2">Yes! SnapRill includes a dedicated 1-click MP3 audio extraction feature and an interactive video trimming slider that lets you choose custom start/end points to download only the exact segment you need.</span>
+            <div id="faqA2" class="faq-answer-wrap">
+              <div class="faq-answer-inner">
+                <div class="px-4 pb-4 pt-2 text-xs sm:text-sm text-slate-300 border-t border-blue-900/30 leading-relaxed">
+                  <span id="faqAText2">Yes! SnapRill includes a dedicated 1-click MP3 audio extraction feature and an interactive video trimming slider that lets you choose custom start/end points to download only the exact segment you need.</span>
+                </div>
+              </div>
             </div>
           </div>
 
           <!-- FAQ Item 4 -->
-          <div class="faq-item rounded-2xl bg-[#0e1b3d]/85 border border-blue-900/40 overflow-hidden transition-all duration-300">
-            <button onclick="toggleFaq(3)" class="w-full p-4 text-left flex items-center justify-between gap-3 text-sm sm:text-base font-semibold text-white hover:text-rose-400 transition-colors">
+          <div class="faq-item rounded-2xl bg-[#0e1b3d]/85 border border-blue-900/40 overflow-hidden">
+            <button type="button" onclick="toggleFaq(3)" class="w-full p-4 text-left flex items-center justify-between gap-3 text-sm sm:text-base font-semibold text-white hover:text-rose-400 transition-colors">
               <span id="faqQ3">Where are downloaded videos saved on my phone or computer?</span>
               <svg id="faqIcon3" class="w-4 h-4 text-blue-300 transform transition-transform duration-300 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
               </svg>
             </button>
-            <div id="faqA3" class="hidden px-4 pb-4 pt-1 text-xs sm:text-sm text-slate-300 border-t border-blue-900/30 leading-relaxed">
-              <span id="faqAText3">All files are directly saved into your device's default "Downloads" folder (or Gallery / Photos on Android & iPhone) so you can access, edit, and share them completely offline.</span>
+            <div id="faqA3" class="faq-answer-wrap">
+              <div class="faq-answer-inner">
+                <div class="px-4 pb-4 pt-2 text-xs sm:text-sm text-slate-300 border-t border-blue-900/30 leading-relaxed">
+                  <span id="faqAText3">All files are directly saved into your device's default "Downloads" folder (or Gallery / Photos on Android & iPhone) so you can access, edit, and share them completely offline.</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -927,29 +963,19 @@
       setupHeadingNodes();
     }
 
-    // Interactive FAQ Accordion
+    // Interactive FAQ Accordion (Smooth grid reveal without jumping or vibrating the page)
     function toggleFaq(index) {
       const targetAns = document.getElementById(`faqA${index}`);
       const targetIcon = document.getElementById(`faqIcon${index}`);
       if (!targetAns) return;
-      const isCurrentlyHidden = targetAns.classList.contains('hidden');
+      const isOpen = targetAns.classList.contains('is-open');
 
-      // Close all other FAQs for clean single-accordion UX
-      for (let i = 0; i < 4; i++) {
-        const a = document.getElementById(`faqA${i}`);
-        const ic = document.getElementById(`faqIcon${i}`);
-        if (a && i !== index) {
-          a.classList.add('hidden');
-          if (ic) ic.classList.remove('rotate-180', 'text-rose-400');
-        }
-      }
-
-      if (isCurrentlyHidden) {
-        targetAns.classList.remove('hidden');
-        if (targetIcon) targetIcon.classList.add('rotate-180', 'text-rose-400');
-      } else {
-        targetAns.classList.add('hidden');
+      if (isOpen) {
+        targetAns.classList.remove('is-open');
         if (targetIcon) targetIcon.classList.remove('rotate-180', 'text-rose-400');
+      } else {
+        targetAns.classList.add('is-open');
+        if (targetIcon) targetIcon.classList.add('rotate-180', 'text-rose-400');
       }
     }
 
@@ -1127,6 +1153,15 @@
         previewNotice.classList.add('hidden');
         previewNotice.textContent = '';
       }
+      thumbImg.onerror = function() {
+        if (item.coverUrl && item.coverUrl.startsWith('http') && !thumbImg.dataset.proxyTried) {
+          thumbImg.dataset.proxyTried = '1';
+          thumbImg.src = `${API_BASE}/api/proxy-stream?url=${encodeURIComponent(item.coverUrl)}`;
+        } else {
+          thumbImg.src = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80';
+        }
+      };
+      thumbImg.dataset.proxyTried = '';
       thumbImg.src = item.coverUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80';
       thumbImg.classList.remove('hidden');
       videoPlayer.classList.add('hidden');
