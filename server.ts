@@ -425,6 +425,36 @@ async function extractSocialWithClipto(targetUrl: string, refererPath: string): 
   }
 }
 
+async function isSocialStreamReachable(targetUrl?: string, referer?: string): Promise<boolean> {
+  if (!targetUrl || !targetUrl.startsWith('http')) return false;
+  try {
+    const headers: Record<string, string> = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    };
+    if (referer) headers['Referer'] = referer;
+    const res = await fetch(targetUrl, {
+      method: 'HEAD',
+      headers,
+      redirect: 'follow',
+      signal: AbortSignal.timeout(3500),
+    });
+    if (res.ok) return true;
+    if (res.status === 405 || res.status === 403) {
+      const probe = await fetch(targetUrl, {
+        method: 'GET',
+        headers: { ...headers, Range: 'bytes=0-1' },
+        redirect: 'follow',
+        signal: AbortSignal.timeout(3500),
+      });
+      try { await probe.body?.cancel(); } catch {}
+      return probe.ok || probe.status === 206;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 import { chmodSync, existsSync, statSync } from 'fs';
 import { createHash } from 'crypto';
 
@@ -1127,11 +1157,20 @@ app.all(['/api/resolve', '/api/resolve-video'], async (req: Request, res: Respon
           authorName = cliptoIg.author;
           author = cliptoIg.author.startsWith('@') ? cliptoIg.author : `@${cliptoIg.author}`;
         }
-        if (cliptoIg.thumbnail) coverUrl = cliptoIg.thumbnail;
         if (cliptoIg.duration) duration = cliptoIg.duration;
         if (cliptoIg.likes) likesText = Number(cliptoIg.likes).toLocaleString();
-        if (cliptoIg.videoUrl) directMp4Url = cliptoIg.videoUrl;
-        if (cliptoIg.audioUrl) directAudioUrl = cliptoIg.audioUrl;
+
+        const [cliptoVideoOk, cliptoThumbOk] = await Promise.all([
+          cliptoIg.videoUrl ? isSocialStreamReachable(cliptoIg.videoUrl, 'https://www.instagram.com/') : Promise.resolve(false),
+          cliptoIg.thumbnail ? isSocialStreamReachable(cliptoIg.thumbnail, 'https://www.instagram.com/') : Promise.resolve(false),
+        ]);
+        if (cliptoThumbOk && cliptoIg.thumbnail) {
+          coverUrl = cliptoIg.thumbnail;
+        }
+        if (cliptoVideoOk && cliptoIg.videoUrl) {
+          directMp4Url = cliptoIg.videoUrl;
+          directAudioUrl = cliptoIg.audioUrl || cliptoIg.videoUrl;
+        }
       }
 
       if (!directMp4Url && btchIg && btchIg.status && Array.isArray(btchIg.result) && btchIg.result[0]?.url) {
@@ -1269,10 +1308,19 @@ app.all(['/api/resolve', '/api/resolve-video'], async (req: Request, res: Respon
           authorName = cliptoFb.author;
           author = cliptoFb.author.startsWith('@') ? cliptoFb.author : `@${cliptoFb.author}`;
         }
-        if (cliptoFb.thumbnail) coverUrl = cliptoFb.thumbnail;
         if (cliptoFb.duration) duration = cliptoFb.duration;
-        if (cliptoFb.videoUrl) directMp4Url = cliptoFb.videoUrl;
-        if (cliptoFb.audioUrl) directAudioUrl = cliptoFb.audioUrl;
+
+        const [cliptoVideoOk, cliptoThumbOk] = await Promise.all([
+          cliptoFb.videoUrl ? isSocialStreamReachable(cliptoFb.videoUrl, 'https://www.facebook.com/') : Promise.resolve(false),
+          cliptoFb.thumbnail ? isSocialStreamReachable(cliptoFb.thumbnail, 'https://www.facebook.com/') : Promise.resolve(false),
+        ]);
+        if (cliptoThumbOk && cliptoFb.thumbnail) {
+          coverUrl = cliptoFb.thumbnail;
+        }
+        if (cliptoVideoOk && cliptoFb.videoUrl) {
+          directMp4Url = cliptoFb.videoUrl;
+          directAudioUrl = cliptoFb.audioUrl || cliptoFb.videoUrl;
+        }
       }
 
       if (!directMp4Url && btchFb && btchFb.status && (btchFb.HD || btchFb.Normal_video)) {
@@ -1443,7 +1491,7 @@ app.get('/api/proxy-stream', async (req: Request, res: Response) => {
 
     const pipeStreamWithRedirects = (currentUrl: string, redirectsLeft = 3) => {
       const client = currentUrl.startsWith('https:') ? https : http;
-      const request = client.get(currentUrl, { headers }, (remoteRes) => {
+      const request = client.get(currentUrl, { headers, family: 4, timeout: 12000 }, (remoteRes) => {
         const statusCode = remoteRes.statusCode || 200;
         if ([301, 302, 303, 307, 308].includes(statusCode) && remoteRes.headers.location && redirectsLeft > 0) {
           remoteRes.resume();
@@ -1471,6 +1519,10 @@ app.get('/api/proxy-stream', async (req: Request, res: Response) => {
 
         res.status(statusCode);
         remoteRes.pipe(res);
+      });
+
+      request.on('timeout', () => {
+        request.destroy(new Error('Upstream stream timeout'));
       });
 
       request.on('error', (err) => {
