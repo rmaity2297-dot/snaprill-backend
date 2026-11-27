@@ -1489,32 +1489,14 @@ app.get('/api/proxy-stream', async (req: Request, res: Response) => {
       headers['Referer'] = 'https://www.instagram.com/';
     }
 
-    let activeRequest: ReturnType<typeof https.get> | null = null;
-    let clientClosed = false;
-
-    req.on('close', () => {
-      clientClosed = true;
-      try { activeRequest?.destroy(); } catch {}
-    });
-
     const pipeStreamWithRedirects = (currentUrl: string, redirectsLeft = 3) => {
-      if (clientClosed) return;
       const client = currentUrl.startsWith('https:') ? https : http;
       const request = client.get(currentUrl, { headers, family: 4, timeout: 12000 }, (remoteRes) => {
-        // Clear initial connect/header timeout once upstream starts responding so paused video previews never time out
-        request.setTimeout(0);
-        remoteRes.socket?.setTimeout(0);
-
         const statusCode = remoteRes.statusCode || 200;
         if ([301, 302, 303, 307, 308].includes(statusCode) && remoteRes.headers.location && redirectsLeft > 0) {
           remoteRes.resume();
           const nextUrl = new URL(remoteRes.headers.location, currentUrl).toString();
           return pipeStreamWithRedirects(nextUrl, redirectsLeft - 1);
-        }
-
-        if (clientClosed) {
-          remoteRes.resume();
-          return;
         }
 
         res.setHeader('Access-Control-Allow-Origin', '*');
@@ -1538,14 +1520,12 @@ app.get('/api/proxy-stream', async (req: Request, res: Response) => {
         res.status(statusCode);
         remoteRes.pipe(res);
       });
-      activeRequest = request;
 
       request.on('timeout', () => {
         request.destroy(new Error('Upstream stream timeout'));
       });
 
       request.on('error', (err) => {
-        if (clientClosed || res.destroyed || res.writableEnded) return;
         console.error('Proxy stream error:', err);
         if (!res.headersSent) {
           res.status(502).send('Error streaming media');
