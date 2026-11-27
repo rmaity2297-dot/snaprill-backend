@@ -1611,8 +1611,8 @@
           const sizeLabel = totalBytes > 0 ? ` (${(totalBytes / (1024 * 1024)).toFixed(1)} MB)` : '';
 
           if (saveBtn) {
-            saveBtn.removeAttribute('download');
-            saveBtn.target = '_blank';
+            saveBtn.download = filename;
+            saveBtn.removeAttribute('target');
             saveBtn.rel = 'noopener';
             saveBtn.href = androidDlUrl;
             saveBtn.textContent = '💾 Save File';
@@ -1712,8 +1712,8 @@
 
         if (saveBtn) {
           if (isAndroidErr) {
-            saveBtn.removeAttribute('download');
-            saveBtn.target = '_blank';
+            saveBtn.download = filename;
+            saveBtn.removeAttribute('target');
             saveBtn.onclick = function() {
               const s = safeDirectUrl.includes('?') ? '&' : '?';
               saveBtn.href = `${safeDirectUrl}${s}_dl=${Date.now()}`;
