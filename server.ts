@@ -3095,9 +3095,20 @@ async function startServer() {
     app.use(vite.middlewares);
     console.log('⚡ Vite development middlewares attached');
   } else {
-    app.use(express.static(path.resolve(__dirname, 'dist')));
+    const distDir = path.resolve(__dirname, 'dist');
+    const distIndex = path.join(distDir, 'index.html');
+    const rootIndex = path.join(process.cwd(), 'index.html');
+    if (fs.existsSync(distDir)) {
+      app.use(express.static(distDir));
+    }
     app.get('*', (_req: Request, res: Response) => {
-      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+      if (fs.existsSync(distIndex)) {
+        return res.sendFile(distIndex);
+      }
+      if (fs.existsSync(rootIndex)) {
+        return res.sendFile(rootIndex);
+      }
+      return res.status(200).send('SnapRill API Server Running');
     });
     console.log('📦 Production static assets mounted');
   }
